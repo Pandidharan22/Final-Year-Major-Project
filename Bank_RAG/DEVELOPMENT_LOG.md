@@ -45,3 +45,9 @@
 - Fallback implementation: Added pdfplumber as the deterministic fallback after pypdf, logged raw and cleaned character counts plus the extraction method, and skip writing outputs when cleaned text remains empty while removing any stale JSON artifact.
 - Determinism and scope: Extraction order unchanged; only text-bearing PDFs are persisted to data/cleaned/, and image-only/unreadable files are logged and excluded to keep the dataset deterministic and text-only.
 - Extraction outcomes (post-adjustment): interest_rates (pypdf, raw=24551, cleaned=23806); kyc_master_direction (pypdf, raw=241476, cleaned=232569); prudential_norms (pypdf, raw=71341, cleaned=70056); schedule_of_charges (pypdf, raw=3104, cleaned=2886); savings_account_general_terms_and_conditions skipped as image-only.
+
+## Step 4 – Embedding Layer & FAISS Index
+- Model used: sentence-transformers/all-MiniLM-L6-v2 on CPU with deterministic seeds.
+- Vector dimension: 384; total chunks embedded: 97 across 4 documents (interest_rates=7, kyc_master_direction=68, prudential_norms=21, schedule_of_charges=1).
+- Determinism strategy: Fixed Python/NumPy/torch seeds, deterministic torch algorithms, sorted chunk files and chunk indices prior to encoding, CPU-only inference, and normalized embeddings.
+- Outputs: FAISS index stored at vector_store/index.faiss and metadata at vector_store/metadata.json recording model, chunk count, documents indexed, and STATIC_EMBED_TIMESTAMP.
