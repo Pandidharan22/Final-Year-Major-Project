@@ -1,0 +1,49 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.so
+*.dylib
+
+# Virtual environments
+.venv/
+.env/
+venv/
+env/
+ENV/
+venv.bak/
+env.bak/
+
+# Environment files
+.env
+.env.*
+*.env
+
+# IDE settings
+.vscode/
+.idea/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# Caches and temp files
+.cache/
+.mypy_cache/
+.pytest_cache/
+*.log
+*.tmp
+
+# Vector stores and embeddings
+*/vector_store/
+vector_store/
+*/embeddings/
+embeddings/

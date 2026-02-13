@@ -1,0 +1,50 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE / editor settings
+.vscode/
+.idea/
+
+# Logs and local configs
+*.log
+*.tmp
+*.local
+
+# Data artifacts
+*.csv
+*.tsv
+*.parquet
+
+# Vector stores and embeddings
+vector_store/
+embeddings/
+*.faiss
+*.pkl
+*.npy
+*.npz
+
+# Cache directories
+.cache/
+.mypy_cache/
+.pytest_cache/
+
+# Project-specific data outputs
+data/chunks/
+data/cleaned/
