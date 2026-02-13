@@ -22,3 +22,9 @@
 - What was wrong: RBI source directory name could include a space instead of an underscore, causing files to be skipped; dynamic timestamps in `extracted_at` violated determinism.
 - What was fixed: Ingestion now resolves `data/raw/rbi_master_circulars` to `data/raw/rbi/master_circulars` deterministically and replaces `extracted_at` with the constant `STATIC_INGESTION_TIMESTAMP`.
 - Why determinism matters: Stable inputs and outputs ensure reproducible runs, predictable JSON artifacts, and reliable downstream indexing.
+
+## Step 2.6 – Correct Root Repository Initialization
+- What went wrong: Git was initialized inside Bank_RAG instead of the project root, leaving the parent folder without version control coverage.
+- Why root-level repo is required: Tracking from `Final Year Project - II` ensures consistent history for all subprojects and avoids nested repositories that complicate staging, ignores, and future automation.
+- Commit hash: badb9c4dbba5faf4ce1e6412616f77c7420730f2
+- Confirmation: Removed Bank_RAG/.git and reinitialized the repository at the root with the correct branch and ignore rules.
