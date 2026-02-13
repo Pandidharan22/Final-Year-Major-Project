@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Iterable, Sequence, Tuple
 
+import pdfplumber
 from pypdf import PdfReader
 
 RAW_DIRECTORIES: Tuple[Tuple[str, Sequence[Path]], ...] = (
@@ -25,10 +26,33 @@ def iter_pdf_files() -> Iterable[Tuple[str, Path]]:
             yield category, pdf_path
 
 
-def extract_pdf_text(pdf_path: Path) -> str:
-    reader = PdfReader(str(pdf_path))
-    pages = [page.extract_text() or "" for page in reader.pages]
-    return "\n".join(pages)
+def extract_pdf_text(pdf_path: Path) -> tuple[str, str]:
+    # First attempt: pypdf
+    try:
+        reader = PdfReader(str(pdf_path))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = "\n".join(pages)
+    except Exception as exc:  # noqa: BLE001
+        print(f"pypdf extraction error for {pdf_path.name}: {exc}")
+        text = ""
+
+    method_used = "pypdf"
+
+    # Fallback: pdfplumber if pypdf produced nothing
+    if len(text.strip()) == 0:
+        try:
+            with pdfplumber.open(str(pdf_path)) as pdf:
+                plumber_pages = [page.extract_text() or "" for page in pdf.pages]
+            text = "\n".join(plumber_pages)
+            method_used = "pdfplumber"
+        except Exception as exc:  # noqa: BLE001
+            print(f"pdfplumber extraction error for {pdf_path.name}: {exc}")
+            method_used = "failed"
+
+    if len(text.strip()) == 0:
+        print(f"Text extraction failed for {pdf_path.name}")
+
+    return text, method_used
 
 
 def clean_text(raw_text: str) -> str:
@@ -63,10 +87,25 @@ def process_pdfs() -> None:
     for category, pdf_path in iter_pdf_files():
         print(f"Processing: {pdf_path}")
         try:
-            raw_text = extract_pdf_text(pdf_path)
+            raw_text, method_used = extract_pdf_text(pdf_path)
             cleaned = clean_text(raw_text)
         except Exception as exc:  # noqa: BLE001
             print(f"Error processing {pdf_path}: {exc}")
+            continue
+
+        raw_char_count = len(raw_text)
+        cleaned_char_count = len(cleaned)
+        print(
+            f"Extraction method: {method_used}; raw_char_count={raw_char_count}; "
+            f"cleaned_char_count={cleaned_char_count}"
+        )
+
+        output_path = OUTPUT_DIR / f"{pdf_path.stem}.json"
+
+        if cleaned_char_count == 0:
+            print(f"Skipping image-only or unreadable PDF: {pdf_path.name}")
+            if output_path.exists():
+                output_path.unlink()
             continue
 
         document_id = pdf_path.stem
@@ -79,7 +118,6 @@ def process_pdfs() -> None:
             "extracted_at": STATIC_INGESTION_TIMESTAMP,
         }
 
-        output_path = OUTPUT_DIR / f"{pdf_path.stem}.json"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", encoding="utf-8") as f:
             json.dump(output, f, ensure_ascii=False, indent=2)
