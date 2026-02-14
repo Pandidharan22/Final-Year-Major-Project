@@ -51,3 +51,9 @@
 - Vector dimension: 384; total chunks embedded: 97 across 4 documents (interest_rates=7, kyc_master_direction=68, prudential_norms=21, schedule_of_charges=1).
 - Determinism strategy: Fixed Python/NumPy/torch seeds, deterministic torch algorithms, sorted chunk files and chunk indices prior to encoding, CPU-only inference, and normalized embeddings.
 - Outputs: FAISS index stored at vector_store/index.faiss and metadata at vector_store/metadata.json recording model, chunk count, documents indexed, and STATIC_EMBED_TIMESTAMP.
+
+## Step 5 – Semantic Retrieval Engine
+- Retrieval design: Load FAISS index and chunk metadata, embed queries with all-MiniLM-L6-v2, and return top-k nearest chunks with rank, IDs, source category, score, and 300-char preview.
+- Similarity metric: Cosine via inner-product over normalized embeddings using faiss.IndexFlatIP.
+- Determinism strategy: Fixed seeds for Python/NumPy/torch, deterministic torch algorithms, CPU-only inference, and sorted chunk loading to maintain stable index-to-metadata alignment.
+- Observations: CLI prompt provides ranked results; embedding dimension 384; default top_k=5; smoke test query returned expected interest_rates chunks with stable scores.
