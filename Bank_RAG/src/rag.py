@@ -1,13 +1,19 @@
-import json
 import os
+import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import requests
-import torch
+from huggingface_hub import HfApi
 from dotenv import load_dotenv
 
-from src.retrieve import (
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+load_dotenv(BASE_DIR / ".env")
+
+from src.retrieve import (  # noqa: E402
     CHUNKS_DIR,
     build_model,
     load_chunks,
@@ -16,9 +22,15 @@ from src.retrieve import (
     set_determinism,
 )
 
-INFERENCE_URL = "https://api-inference.huggingface.co/models/google/gemma-2b-it"
+MODEL_ID = os.getenv("HF_MODEL_ID", "mistralai/Mistral-7B-Instruct-v0.2")
+ROUTER_ENDPOINT = "https://router.huggingface.co"
+PREFERRED_PROVIDER = os.getenv("HF_INFERENCE_PROVIDER")
 DEFAULT_TOP_K = 5
 MAX_PREVIEW_CHARS = 300
+SYSTEM_PROMPT = (
+    "You are a banking assistant. Answer ONLY using the provided context. "
+    "If the answer is not in the context, say: 'I don't have sufficient information in the provided documents.'"
+)
 
 
 def build_chunk_map(chunks: List[Dict[str, object]]) -> Dict[str, Dict[str, object]]:
@@ -34,42 +46,86 @@ def format_context(chunk_texts: List[str]) -> str:
 
 
 def prepare_prompt(context: str, query: str) -> str:
-    system = (
-        "You are a banking assistant.\n"
-        "Answer ONLY using the provided context.\n"
-        "If the answer is not in the context, say:\n"
-        "\"I don't have sufficient information in the provided documents.\""
+    # User message content combining context and question for conversational schema
+    return f"CONTEXT:\n{context}\n\nQUESTION:\n{query}"
+
+
+def resolve_provider(model_id: str, preferred: Optional[str] = None) -> str:
+    """
+    Pick an inference provider that is actually mapped for the model.
+
+    The HF router returns 404 when the model has no provider mapping (e.g., gemma-2b-it).
+    Fail fast with a helpful error instead of letting the request fail deep in the stack.
+    """
+
+    info = HfApi().model_info(model_id, expand=["inferenceProviderMapping"])
+    mappings = info.inference_provider_mapping or []
+
+    if preferred:
+        for mapping in mappings:
+            if mapping.provider == preferred:
+                return preferred
+        available = ", ".join(sorted({m.provider for m in mappings})) or "none"
+        raise RuntimeError(
+            f"Preferred provider '{preferred}' is not available for model '{model_id}'. "
+            f"Available providers: {available}."
+        )
+
+    if mappings:
+        return mappings[0].provider
+
+    raise RuntimeError(
+        "No inference providers are registered for this model on the HF router. "
+        "Choose a model with an inferenceProviderMapping (e.g., google/gemma-2-9b-it) "
+        "or deploy your own endpoint and set HF_MODEL_ID and HF_INFERENCE_PROVIDER."
     )
-    parts = [
-        f"SYSTEM:\n{system}",
-        f"CONTEXT:\n{context}",
-        f"QUESTION:\n{query}",
-    ]
-    return "\n\n".join(parts)
 
 
 def call_hf_inference(token: str, prompt: str) -> str:
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "temperature": 0.2,
-            "max_new_tokens": 300,
-            "return_full_text": False,
-        },
+    try:
+        provider = resolve_provider(MODEL_ID, PREFERRED_PROVIDER)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(str(exc)) from exc
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
     }
-    response = requests.post(INFERENCE_URL, headers=headers, json=payload, timeout=60)
+    payload = {
+        "model": MODEL_ID,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": 300,
+    }
+
+    url = f"{ROUTER_ENDPOINT}/{provider}/v1/chat/completions"
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=90)
+    except requests.RequestException as exc:  # noqa: BLE001
+        raise RuntimeError(f"request failed for {url}: {exc!r}") from exc
+
     if response.status_code == 429:
         raise RuntimeError("Rate limited by Hugging Face Inference API (429)")
+    if response.status_code == 404:
+        raise RuntimeError(f"endpoint not found (404) at {url}: {response.text}")
+    if response.status_code == 401:
+        raise RuntimeError(f"unauthorized (401) at {url}: {response.text}")
     if not response.ok:
-        raise RuntimeError(f"HF inference failed: status={response.status_code}, body={response.text}")
+        raise RuntimeError(
+            f"HF inference failed at {url}: status={response.status_code}, body={response.text}"
+        )
 
     data = response.json()
-    if isinstance(data, list) and data and "generated_text" in data[0]:
-        return data[0]["generated_text"].strip()
-    if isinstance(data, dict) and "generated_text" in data:
-        return str(data["generated_text"]).strip()
-    raise RuntimeError(f"Unexpected HF response format: {data}")
+    choices = data.get("choices") if isinstance(data, dict) else None
+    if choices and isinstance(choices, list) and choices and choices[0].get("message", {}).get("content"):
+        return str(choices[0]["message"]["content"]).strip()
+
+    print(f"Raw HF response (unexpected format): {data}")
+    raise RuntimeError(f"Unexpected HF response format from provider '{provider}'")
 
 
 def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
@@ -110,6 +166,8 @@ def main() -> None:
     if not token_present:
         print("HF_API_TOKEN is missing. Please set it in Bank_RAG/.env.")
         return
+
+    print(f"Using HF model: {MODEL_ID}")
 
     model = build_model()
     chunks = load_chunks(base_dir / CHUNKS_DIR)

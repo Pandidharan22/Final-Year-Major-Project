@@ -64,3 +64,42 @@
 - Integration design: CLI prompt loads HF_API_TOKEN from .env, gathers top_k chunks through retrieve(), injects structured context blocks, and sends a single POST to the inference API; returns answer plus source chunk IDs.
 - Failure handling: Clear error when token missing, explicit status reporting for non-200 responses, 429 rate-limit warning, and graceful KeyboardInterrupt exit.
 - Observations: Latency not measured here (depends on remote API); context length and injected chunk IDs are printed for visibility.
+
+## Step 6 Adjustment – Switch to Mistral-7B-Instruct (HF Router Compatible)
+- Gemma router limitation: google/gemma-2b-it is not available through HF router free providers, causing 404/401 failures.
+- New model choice: mistralai/Mistral-7B-Instruct-v0.2.
+- Rationale: Use a model with free-tier compatible HF router access while keeping the same payload structure, deterministic generation parameters, and retrieval pipeline.
+
+## Step 6 Fix – Switch to Conversational Task Schema for Mistral
+- Provider limitation: HF router maps Mistral-7B-Instruct via providers that require the conversational task, so text-generation payloads fail.
+- Payload format change: Adopted OpenAI-style messages array with system/user roles (no `inputs` or `parameters`), temperature=0.2, max_tokens=300.
+- Response structure adjustment: Parse `choices[0].message.content` and log raw JSON when `choices` is absent for easier troubleshooting.
+
+## Milestone 1 – Fully Functional Deterministic Banking RAG System
+### Architecture Overview
+- Ingestion: deterministic PDF parsing with fallback handling.
+- Cleaning: control-character filtering and newline normalization to preserve printable text.
+- Chunking: 500-word windows with 75-word overlap for stable context slices.
+- MiniLM embeddings (384-dim): sentence-transformers/all-MiniLM-L6-v2 on CPU with fixed seeds.
+- FAISS index: IndexFlatIP over normalized vectors with aligned metadata.
+- HF Router LLM: Mistral-7B-Instruct via router.huggingface.co conversational API.
+- Deterministic guardrails: fixed seeds, ordered processing, static timestamps, and stable prompts.
+
+### Problems Encountered & Solutions
+- PDF Extraction Failure: savings_account PDF was image-only; excluded rather than adding OCR to maintain determinism and scope.
+- Zero Chunk Issue: over-aggressive cleaning removed content; added diagnostics and safeguards to prevent empty outputs.
+- HF API Endpoint Deprecation: api-inference endpoint returned 410; migrated to router.huggingface.co.
+- Gemma Model Unsupported on Router: no inference providers registered; switched to Mistral-7B-Instruct.
+- Payload Format Mismatch: text-generation schema rejected by conversational providers; adopted chat-style messages payload.
+
+### Determinism Strategy
+- Static timestamps for artifacts.
+- Sorted processing of files, chunks, and retrieval inputs.
+- Fixed chunk size and overlap parameters.
+- Generation settings locked: temperature=0.2, max_tokens=300.
+- Controlled context injection with structured prompts.
+
+### Current System Capabilities
+- Accurate retrieval from FAISS-backed index.
+- Grounded answers constrained to supplied context.
+- Explicit refusals for out-of-scope or missing-context queries.
