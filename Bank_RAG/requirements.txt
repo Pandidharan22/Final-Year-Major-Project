@@ -3,3 +3,5 @@ nltk==3.8.1
 sentence-transformers==3.0.1
 faiss-cpu==1.13.2
 pdfplumber==0.11.4
+python-dotenv==1.0.1
+requests==2.32.3

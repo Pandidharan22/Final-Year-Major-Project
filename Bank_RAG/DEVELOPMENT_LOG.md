@@ -57,3 +57,10 @@
 - Similarity metric: Cosine via inner-product over normalized embeddings using faiss.IndexFlatIP.
 - Determinism strategy: Fixed seeds for Python/NumPy/torch, deterministic torch algorithms, CPU-only inference, and sorted chunk loading to maintain stable index-to-metadata alignment.
 - Observations: CLI prompt provides ranked results; embedding dimension 384; default top_k=5; smoke test query returned expected interest_rates chunks with stable scores.
+
+## Step 6 – Hugging Face Gemma RAG Integration
+- Model/endpoint: google/gemma-2b-it via Hugging Face Inference API at https://api-inference.huggingface.co/models/google/gemma-2b-it.
+- Deterministic parameters: temperature=0.2, max_new_tokens=300, return_full_text=false; retrieval top_k=5 with sorted chunk loading and fixed seeds via existing retrieval helpers.
+- Integration design: CLI prompt loads HF_API_TOKEN from .env, gathers top_k chunks through retrieve(), injects structured context blocks, and sends a single POST to the inference API; returns answer plus source chunk IDs.
+- Failure handling: Clear error when token missing, explicit status reporting for non-200 responses, 429 rate-limit warning, and graceful KeyboardInterrupt exit.
+- Observations: Latency not measured here (depends on remote API); context length and injected chunk IDs are printed for visibility.
