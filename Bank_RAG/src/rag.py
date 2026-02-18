@@ -1,5 +1,7 @@
+import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -15,6 +17,7 @@ load_dotenv(BASE_DIR / ".env")
 
 from src.retrieve import (  # noqa: E402
     CHUNKS_DIR,
+    MODEL_NAME,
     build_model,
     load_chunks,
     load_index_and_metadata,
@@ -27,6 +30,9 @@ ROUTER_ENDPOINT = "https://router.huggingface.co"
 PREFERRED_PROVIDER = os.getenv("HF_INFERENCE_PROVIDER")
 DEFAULT_TOP_K = 5
 MAX_PREVIEW_CHARS = 300
+LOG_PATH = BASE_DIR / "logs" / "rag_traces.jsonl"
+REFUSAL_PHRASE = "I don't have sufficient information"
+EMBEDDING_MODEL = MODEL_NAME
 SYSTEM_PROMPT = (
     "You are a banking assistant. Answer ONLY using the provided context. "
     "If the answer is not in the context, say: 'I don't have sufficient information in the provided documents.'"
@@ -43,6 +49,13 @@ def format_context(chunk_texts: List[str]) -> str:
         lines.append(f"=== Context Chunk {idx} ===")
         lines.append(text)
     return "\n".join(lines)
+
+
+def append_trace(trace: Dict[str, object]) -> None:
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(trace, ensure_ascii=False))
+        handle.write("\n")
 
 
 def prepare_prompt(context: str, query: str) -> str:
@@ -135,20 +148,57 @@ def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
     if not token:
         raise RuntimeError("HF_API_TOKEN is missing. Please set it in Bank_RAG/.env.")
 
+    total_start = time.perf_counter()
     set_determinism()
     model = build_model()
     chunks = load_chunks(base_dir / CHUNKS_DIR)
     chunk_map = build_chunk_map(chunks)
     index, metadata = load_index_and_metadata(base_dir)
 
+    retrieval_start = time.perf_counter()
     results = retrieve(query, top_k, model, index, chunks)
+    retrieval_latency_ms = (time.perf_counter() - retrieval_start) * 1000.0
+
     chunk_ids = [item["chunk_id"] for item in results]
     chunk_texts = [chunk_map[cid]["text"] for cid in chunk_ids if cid in chunk_map]
 
     context = format_context(chunk_texts)
     prompt = prepare_prompt(context, query)
 
+    generation_start = time.perf_counter()
     answer = call_hf_inference(token, prompt)
+    generation_latency_ms = (time.perf_counter() - generation_start) * 1000.0
+    total_latency_ms = (time.perf_counter() - total_start) * 1000.0
+
+    similarity_scores = [float(item.get("score", 0.0)) for item in results]
+    mean_top_k_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+    score_spread = similarity_scores[0] - similarity_scores[-1] if similarity_scores else 0.0
+    retrieval_confidence_score = round((0.7 * mean_top_k_similarity) + (0.3 * score_spread), 4)
+    if retrieval_confidence_score >= 0.55:
+        confidence_level = "high"
+    elif retrieval_confidence_score >= 0.40:
+        confidence_level = "medium"
+    else:
+        confidence_level = "low"
+    trace = {
+        "query": query,
+        "retrieved_chunk_ids": chunk_ids,
+        "similarity_scores": similarity_scores,
+        "mean_top_k_similarity": mean_top_k_similarity,
+        "score_spread": score_spread,
+        "retrieval_confidence_score": retrieval_confidence_score,
+        "confidence_level": confidence_level,
+        "top_k": int(top_k),
+        "context_length_chars": len(context),
+        "retrieval_latency_ms": retrieval_latency_ms,
+        "generation_latency_ms": generation_latency_ms,
+        "total_latency_ms": total_latency_ms,
+        "answer_length_chars": len(answer),
+        "refusal_detected": REFUSAL_PHRASE in answer,
+        "model_name": MODEL_ID,
+        "embedding_model": EMBEDDING_MODEL,
+    }
+    append_trace(trace)
 
     return {
         "query": query,
@@ -182,7 +232,10 @@ def main() -> None:
                 break
             top_k = DEFAULT_TOP_K
             print(f"Top_k: {top_k}")
+            total_start = time.perf_counter()
+            retrieval_start = time.perf_counter()
             results = retrieve(query, top_k, model, index, chunks)
+            retrieval_latency_ms = (time.perf_counter() - retrieval_start) * 1000.0
             chunk_ids = [item["chunk_id"] for item in results]
             chunk_texts = [chunk_map[cid]["text"] for cid in chunk_ids if cid in chunk_map]
             print(f"Injected chunk IDs: {chunk_ids}")
@@ -190,8 +243,41 @@ def main() -> None:
             print(f"Context length: {len(context)} characters")
             prompt = prepare_prompt(context, query)
             try:
+                generation_start = time.perf_counter()
                 answer = call_hf_inference(os.getenv("HF_API_TOKEN", ""), prompt)
+                generation_latency_ms = (time.perf_counter() - generation_start) * 1000.0
+                total_latency_ms = (time.perf_counter() - total_start) * 1000.0
                 print("Answer:\n", answer)
+
+                similarity_scores = [float(item.get("score", 0.0)) for item in results]
+                mean_top_k_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+                score_spread = similarity_scores[0] - similarity_scores[-1] if similarity_scores else 0.0
+                retrieval_confidence_score = round((0.7 * mean_top_k_similarity) + (0.3 * score_spread), 4)
+                if retrieval_confidence_score >= 0.55:
+                    confidence_level = "high"
+                elif retrieval_confidence_score >= 0.40:
+                    confidence_level = "medium"
+                else:
+                    confidence_level = "low"
+                trace = {
+                    "query": query,
+                    "retrieved_chunk_ids": chunk_ids,
+                    "similarity_scores": similarity_scores,
+                    "mean_top_k_similarity": mean_top_k_similarity,
+                    "score_spread": score_spread,
+                    "retrieval_confidence_score": retrieval_confidence_score,
+                    "confidence_level": confidence_level,
+                    "top_k": int(top_k),
+                    "context_length_chars": len(context),
+                    "retrieval_latency_ms": retrieval_latency_ms,
+                    "generation_latency_ms": generation_latency_ms,
+                    "total_latency_ms": total_latency_ms,
+                    "answer_length_chars": len(answer),
+                    "refusal_detected": REFUSAL_PHRASE in answer,
+                    "model_name": MODEL_ID,
+                    "embedding_model": EMBEDDING_MODEL,
+                }
+                append_trace(trace)
             except RuntimeError as exc:
                 print(f"Error: {exc}")
     except KeyboardInterrupt:

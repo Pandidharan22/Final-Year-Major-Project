@@ -103,3 +103,37 @@
 - Accurate retrieval from FAISS-backed index.
 - Grounded answers constrained to supplied context.
 - Explicit refusals for out-of-scope or missing-context queries.
+
+## Step 7 – Query Trace Logging & Observability Layer
+- Logged telemetry fields: query, retrieved_chunk_ids, similarity_scores, top_k, context_length_chars, retrieval_latency_ms, generation_latency_ms, total_latency_ms, answer_length_chars, refusal_detected, model_name, embedding_model.
+- Metric rationale: retrieval/generation/total latency expose performance hotspots; context and answer lengths track prompt/response size; refusal flag surfaces guardrail activations; similarity scores and chunk IDs enable replay and quality inspection; model metadata keeps runs attributable.
+- Observability design: append-only JSONL at logs/rag_traces.jsonl with stable field order, no timestamps or random IDs, directory auto-created for deterministic, replayable traces.
+
+## Step 8 – Retrieval Confidence Scoring
+- Confidence formula: confidence = (0.7 * mean_top_k_similarity) + (0.3 * score_spread), rounded to 4 decimals.
+- Rationale: emphasize overall similarity strength (mean) while incorporating dispersion (spread) to reflect ranking separation.
+- Classification thresholds: >= 0.55 => high; >= 0.40 => medium; else low.
+- Intended use: drive a self-healing loop to adapt behavior (e.g., prompt tweaks, re-query, or fallback) when confidence is low, without introducing randomness.
+
+## Milestone 2 – Observability & Retrieval Confidence Layer
+### Query Trace Logging (Step 7)
+- Telemetry: query, retrieved_chunk_ids, similarity_scores, top_k, context_length_chars, retrieval_latency_ms, generation_latency_ms, total_latency_ms, answer_length_chars, refusal_detected, model_name, embedding_model.
+- Latency tracking: separate retrieval, generation, and total timings via perf_counter for hotspot analysis.
+- Refusal detection: flag when the deterministic refusal phrase is present.
+- Model metadata: logs include LLM and embedding model identifiers for attribution.
+- JSONL append-only: stable field order, no timestamps or random IDs, replayable for audits.
+
+### Retrieval Confidence Scoring (Step 8)
+- Metrics: mean_top_k_similarity and score_spread.
+- Confidence formula: retrieval_confidence_score = (0.7 * mean_top_k_similarity) + (0.3 * score_spread), rounded to 4 decimals.
+- Classification: >= 0.55 → high; >= 0.40 → medium; else low.
+
+### Observations
+- In-domain query → medium confidence.
+- Out-of-domain query → low confidence.
+- Confidence correlates with refusal detection for unsupported questions.
+
+### Engineering Rationale
+- Confidence is a precursor signal for self-healing behaviors (retry, re-prompt, or fallback).
+- Structured logging enables offline evaluation and regression checks.
+- Deterministic scoring and append-only traces ensure reproducibility.
