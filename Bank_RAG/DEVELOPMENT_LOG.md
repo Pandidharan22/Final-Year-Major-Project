@@ -137,3 +137,8 @@
 - Confidence is a precursor signal for self-healing behaviors (retry, re-prompt, or fallback).
 - Structured logging enables offline evaluation and regression checks.
 - Deterministic scoring and append-only traces ensure reproducibility.
+
+## Step 9 – Evaluation Dataset & Metrics Engine
+- Dataset: evaluation/questions.json with labeled in-domain (RBI, schedule_of_charges) and out-of-domain queries for balanced assessment.
+- Metrics: total queries, in/out counts, retrieval_accuracy (in-domain hit rate), refusal_accuracy (out-of-domain refusals), mean confidence segmented by domain.
+- Why these metrics: measure grounding quality (retrieval_accuracy), guardrail correctness (refusal_accuracy), and confidence calibration to inform future self-healing loops.

@@ -1,0 +1,67 @@
+[
+  {
+    "query": "What is the Benchmark Prime Lending Rate?",
+    "expected_document": "interest_rates",
+    "type": "in_domain"
+  },
+  {
+    "query": "How often must banks update KYC information?",
+    "expected_document": "kyc_master_direction",
+    "type": "in_domain"
+  },
+  {
+    "query": "What KYC documents are required for individual customers?",
+    "expected_document": "kyc_master_direction",
+    "type": "in_domain"
+  },
+  {
+    "query": "What is the provisioning norm for sub-standard assets?",
+    "expected_document": "prudential_norms",
+    "type": "in_domain"
+  },
+  {
+    "query": "What is the exposure limit for interbank liabilities?",
+    "expected_document": "prudential_norms",
+    "type": "in_domain"
+  },
+  {
+    "query": "What is the penalty for insufficient balance in a savings account?",
+    "expected_document": "schedule_of_charges",
+    "type": "in_domain"
+  },
+  {
+    "query": "What is the fee for cheque book issuance?",
+    "expected_document": "schedule_of_charges",
+    "type": "in_domain"
+  },
+  {
+    "query": "What are the SMS alert charges for the savings account?",
+    "expected_document": "schedule_of_charges",
+    "type": "in_domain"
+  },
+  {
+    "query": "What is Tesla's latest stock forecast?",
+    "expected_document": null,
+    "type": "out_of_domain"
+  },
+  {
+    "query": "Should I invest in cryptocurrency this year?",
+    "expected_document": null,
+    "type": "out_of_domain"
+  },
+  {
+    "query": "Tell me about Elon Musk's biography",
+    "expected_document": null,
+    "type": "out_of_domain"
+  },
+  {
+    "query": "What will be the weather in Mumbai tomorrow?",
+    "expected_document": null,
+    "type": "out_of_domain"
+  },
+  {
+    "query": "Explain JavaScript async/await",
+    "expected_document": null,
+    "type": "out_of_domain"
+  }
+]
