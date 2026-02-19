@@ -142,3 +142,33 @@
 - Dataset: evaluation/questions.json with labeled in-domain (RBI, schedule_of_charges) and out-of-domain queries for balanced assessment.
 - Metrics: total queries, in/out counts, retrieval_accuracy (in-domain hit rate), refusal_accuracy (out-of-domain refusals), mean confidence segmented by domain.
 - Why these metrics: measure grounding quality (retrieval_accuracy), guardrail correctness (refusal_accuracy), and confidence calibration to inform future self-healing loops.
+
+## Step 10 – Hallucination Risk & Self-Healing Trigger Layer
+- Files modified: src/rag.py.
+- Objective: Derive structured hallucination risk signals from existing telemetry for future self-healing triggers, without altering retrieval, generation, or confidence-scoring logic.
+
+### Risk Formula
+- answer_to_context_ratio = answer_length_chars / context_length_chars, rounded to 4 decimals.
+- hallucination_risk_score: start from base_risk = 1 - retrieval_confidence_score, then apply additive penalties:
+  - +0.25 if refusal_detected == false AND confidence_level == "low" (answered despite weak retrieval signal).
+  - +0.15 if answer_to_context_ratio > 0.20 (answer is disproportionately long relative to supplied context).
+  - +0.10 if score_spread < 0.15 (retrieval scores are clustered, indicating undifferentiated context).
+  - Capped to [0, 1] and rounded to 4 decimals.
+- risk_level: "high" if >= 0.70; "medium" if >= 0.45; else "low".
+- self_healing_trigger: True only when risk_level == "high".
+
+### Rationale for Each Heuristic Component
+- base_risk (1 - confidence): low retrieval confidence directly implies shallower grounding and higher hallucination risk.
+- Non-refusal at low confidence (+0.25): the model answered despite poor evidence—the highest-risk scenario.
+- High answer-to-context ratio (+0.15): an answer exceeding ~20 % of context length likely draws on parametric (ungrounded) knowledge.
+- Low score spread (+0.10): when the top retrieved chunks score similarly, the model lacks a clearly relevant anchor chunk, amplifying risk.
+
+### Why Deterministic Rules
+- No randomness: each penalty is a boolean threshold applied to already-computed scalar fields, ensuring identical inputs always produce identical risk signals.
+- Reproducibility: rule-based thresholds are version-controlled, reviewable, and replayable against any existing trace log without re-running the pipeline.
+- Auditability: each penalty maps to a named heuristic, making risk explanations transparent to domain experts.
+
+### How This Prepares for the Self-Healing Loop
+- self_healing_trigger == True is a gate signal the self-healing layer can consume to decide whether to re-query, adjust top_k, modify the prompt template, or escalate to a fallback model.
+- risk_level provides a three-tier severity axis so future mitigations can be proportionate (e.g., re-rank only at "medium"; re-query at "high").
+- All four new fields are appended to the existing JSONL trace, so offline analysis can correlate risk signals with actual answer quality across the full evaluation dataset.
