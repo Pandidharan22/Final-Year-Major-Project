@@ -142,3 +142,16 @@
 - Dataset: evaluation/questions.json with labeled in-domain (RBI, schedule_of_charges) and out-of-domain queries for balanced assessment.
 - Metrics: total queries, in/out counts, retrieval_accuracy (in-domain hit rate), refusal_accuracy (out-of-domain refusals), mean confidence segmented by domain.
 - Why these metrics: measure grounding quality (retrieval_accuracy), guardrail correctness (refusal_accuracy), and confidence calibration to inform future self-healing loops.
+
+## Step 10 – REST API Layer
+- Intent: Expose the Banking RAG system as a deployable HTTP service so external clients (frontends, scripts, other services) can query it without running Python directly.
+- Files created or modified: src/api.py, requirements.txt (added fastapi==0.115.6, uvicorn==0.34.0).
+- Endpoints: GET /health (liveness probe; confirms index, model, and chunk counts) and POST /ask (accepts {"query", "top_k"}, returns answer, sources, context_length, retrieval_confidence_score, and confidence_level).
+- Design decisions:
+  - Heavy resources (embedding model, FAISS index, chunk map) are loaded once at startup and reused across requests to minimise per-request latency.
+  - The /ask handler delegates to rag_answer() to avoid duplicating confidence-scoring and trace-logging logic; rag_answer() was updated to include retrieval_confidence_score and confidence_level in its return value.
+  - top_k is clamped to [1, 20] to prevent abuse.
+  - Missing HF_API_TOKEN or unavailable index returns a 503; LLM failures surface as 502.
+  - Index-load failures at startup use specific exception types (FileNotFoundError, RuntimeError) and emit a warning for easier diagnostics.
+  - All calls continue to be logged to logs/rag_traces.jsonl for observability continuity.
+- Run command: uvicorn src.api:app --host 0.0.0.0 --port 8000 --reload (from Bank_RAG/ directory).

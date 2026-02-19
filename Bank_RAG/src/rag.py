@@ -205,6 +205,8 @@ def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
         "answer": answer,
         "sources": chunk_ids,
         "context_length": len(context),
+        "retrieval_confidence_score": retrieval_confidence_score,
+        "confidence_level": confidence_level,
     }
 
 
