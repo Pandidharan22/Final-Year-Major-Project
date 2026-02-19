@@ -142,3 +142,9 @@
 - Dataset: evaluation/questions.json with labeled in-domain (RBI, schedule_of_charges) and out-of-domain queries for balanced assessment.
 - Metrics: total queries, in/out counts, retrieval_accuracy (in-domain hit rate), refusal_accuracy (out-of-domain refusals), mean confidence segmented by domain.
 - Why these metrics: measure grounding quality (retrieval_accuracy), guardrail correctness (refusal_accuracy), and confidence calibration to inform future self-healing loops.
+
+## Step 10 – Hallucination Risk & Self-Healing Trigger Layer
+- Risk formula: start with (1 - retrieval_confidence_score); add +0.25 when refusal is absent and confidence is low, +0.15 when answer_to_context_ratio > 0.20, +0.10 when score_spread < 0.15; cap to [0,1] and round to 4 decimals.
+- Heuristic rationale: low confidence without refusal suggests possible hallucination; long answers vs. context indicate drift; narrow score spread shows weak ranking separation—all elevate risk.
+- Deterministic choice: fixed rule set avoids randomness, keeps runs reproducible, and aligns with existing deterministic guardrails.
+- Self-healing prep: risk_level (high/medium/low) and self_healing_trigger flag future hooks for retries, prompt tightening, or fallbacks.

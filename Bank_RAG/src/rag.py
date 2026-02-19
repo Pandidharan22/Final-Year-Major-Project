@@ -180,6 +180,24 @@ def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
         confidence_level = "medium"
     else:
         confidence_level = "low"
+    context_length_chars = len(context)
+    answer_length_chars = len(answer)
+    answer_to_context_ratio = round(answer_length_chars / context_length_chars, 4) if context_length_chars else 0.0
+    risk_score = 1 - retrieval_confidence_score
+    if (not (REFUSAL_PHRASE in answer)) and confidence_level == "low":
+        risk_score += 0.25
+    if answer_to_context_ratio > 0.20:
+        risk_score += 0.15
+    if score_spread < 0.15:
+        risk_score += 0.10
+    hallucination_risk_score = round(min(1.0, max(0.0, risk_score)), 4)
+    if hallucination_risk_score >= 0.70:
+        risk_level = "high"
+    elif hallucination_risk_score >= 0.45:
+        risk_level = "medium"
+    else:
+        risk_level = "low"
+    self_healing_trigger = risk_level == "high"
     trace = {
         "query": query,
         "retrieved_chunk_ids": chunk_ids,
@@ -188,12 +206,16 @@ def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
         "score_spread": score_spread,
         "retrieval_confidence_score": retrieval_confidence_score,
         "confidence_level": confidence_level,
+        "answer_to_context_ratio": answer_to_context_ratio,
+        "hallucination_risk_score": hallucination_risk_score,
+        "risk_level": risk_level,
+        "self_healing_trigger": self_healing_trigger,
         "top_k": int(top_k),
-        "context_length_chars": len(context),
+        "context_length_chars": context_length_chars,
         "retrieval_latency_ms": retrieval_latency_ms,
         "generation_latency_ms": generation_latency_ms,
         "total_latency_ms": total_latency_ms,
-        "answer_length_chars": len(answer),
+        "answer_length_chars": answer_length_chars,
         "refusal_detected": REFUSAL_PHRASE in answer,
         "model_name": MODEL_ID,
         "embedding_model": EMBEDDING_MODEL,
@@ -259,6 +281,26 @@ def main() -> None:
                     confidence_level = "medium"
                 else:
                     confidence_level = "low"
+                context_length_chars = len(context)
+                answer_length_chars = len(answer)
+                answer_to_context_ratio = (
+                    round(answer_length_chars / context_length_chars, 4) if context_length_chars else 0.0
+                )
+                risk_score = 1 - retrieval_confidence_score
+                if (not (REFUSAL_PHRASE in answer)) and confidence_level == "low":
+                    risk_score += 0.25
+                if answer_to_context_ratio > 0.20:
+                    risk_score += 0.15
+                if score_spread < 0.15:
+                    risk_score += 0.10
+                hallucination_risk_score = round(min(1.0, max(0.0, risk_score)), 4)
+                if hallucination_risk_score >= 0.70:
+                    risk_level = "high"
+                elif hallucination_risk_score >= 0.45:
+                    risk_level = "medium"
+                else:
+                    risk_level = "low"
+                self_healing_trigger = risk_level == "high"
                 trace = {
                     "query": query,
                     "retrieved_chunk_ids": chunk_ids,
@@ -267,12 +309,16 @@ def main() -> None:
                     "score_spread": score_spread,
                     "retrieval_confidence_score": retrieval_confidence_score,
                     "confidence_level": confidence_level,
+                    "answer_to_context_ratio": answer_to_context_ratio,
+                    "hallucination_risk_score": hallucination_risk_score,
+                    "risk_level": risk_level,
+                    "self_healing_trigger": self_healing_trigger,
                     "top_k": int(top_k),
-                    "context_length_chars": len(context),
+                    "context_length_chars": context_length_chars,
                     "retrieval_latency_ms": retrieval_latency_ms,
                     "generation_latency_ms": generation_latency_ms,
                     "total_latency_ms": total_latency_ms,
-                    "answer_length_chars": len(answer),
+                    "answer_length_chars": answer_length_chars,
                     "refusal_detected": REFUSAL_PHRASE in answer,
                     "model_name": MODEL_ID,
                     "embedding_model": EMBEDDING_MODEL,
