@@ -141,7 +141,7 @@ def call_hf_inference(token: str, prompt: str) -> str:
     raise RuntimeError(f"Unexpected HF response format from provider '{provider}'")
 
 
-def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
+def run_rag_pipeline(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
     base_dir = Path(__file__).resolve().parent.parent
     load_dotenv(base_dir / ".env")
     token = os.getenv("HF_API_TOKEN", "").strip()
@@ -241,10 +241,33 @@ def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
     append_trace(trace)
 
     return {
-        "query": query,
         "answer": answer,
-        "sources": chunk_ids,
+        "retrieval_confidence": retrieval_confidence_score,
+        "confidence_level": confidence_level,
+        "hallucination_risk": hallucination_risk_score,
+        "risk_level": risk_level,
+        "self_healing_triggered": self_healing_trigger,
+        "refusal_detected": refusal_detected,
+        "latency": {
+            "retrieval_ms": retrieval_latency_ms,
+            "generation_ms": generation_latency_ms,
+            "total_ms": total_latency_ms,
+        },
+        "similarity_scores": similarity_scores,
+        "retrieved_chunk_ids": chunk_ids,
+        "query": query,
         "context_length": len(context),
+        "top_k": int(top_k),
+    }
+
+
+def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
+    result = run_rag_pipeline(query, top_k)
+    return {
+        "query": query,
+        "answer": result.get("answer", ""),
+        "sources": result.get("retrieved_chunk_ids", []),
+        "context_length": result.get("context_length", 0),
     }
 
 
@@ -272,94 +295,11 @@ def main() -> None:
                 break
             top_k = DEFAULT_TOP_K
             print(f"Top_k: {top_k}")
-            total_start = time.perf_counter()
-            retrieval_start = time.perf_counter()
-            results = retrieve(query, top_k, model, index, chunks)
-            retrieval_latency_ms = (time.perf_counter() - retrieval_start) * 1000.0
-            chunk_ids = [item["chunk_id"] for item in results]
-            chunk_texts = [chunk_map[cid]["text"] for cid in chunk_ids if cid in chunk_map]
-            print(f"Injected chunk IDs: {chunk_ids}")
-            context = format_context(chunk_texts)
-            print(f"Context length: {len(context)} characters")
-            prompt = prepare_prompt(context, query)
             try:
-                generation_start = time.perf_counter()
-                answer = call_hf_inference(os.getenv("HF_API_TOKEN", ""), prompt)
-                generation_latency_ms = (time.perf_counter() - generation_start) * 1000.0
-                total_latency_ms = (time.perf_counter() - total_start) * 1000.0
-                print("Answer:\n", answer)
-
-                similarity_scores = [float(item.get("score", 0.0)) for item in results]
-                mean_top_k_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
-                score_spread = similarity_scores[0] - similarity_scores[-1] if similarity_scores else 0.0
-                retrieval_confidence_score = round((0.7 * mean_top_k_similarity) + (0.3 * score_spread), 4)
-                if retrieval_confidence_score >= 0.55:
-                    confidence_level = "high"
-                elif retrieval_confidence_score >= 0.40:
-                    confidence_level = "medium"
-                else:
-                    confidence_level = "low"
-                context_length_chars = len(context)
-                answer_length_chars = len(answer)
-                answer_to_context_ratio = (
-                    round(answer_length_chars / context_length_chars, 4) if context_length_chars else 0.0
-                )
-                refusal_detected = REFUSAL_PHRASE in answer
-                base_risk = 1 - retrieval_confidence_score
-
-                if refusal_detected:
-                    hallucination_risk_score = min(base_risk * 0.3, 0.30)
-                    hallucination_risk_score = round(hallucination_risk_score, 4)
-
-                    risk_level = "low"
-                    self_healing_trigger = False
-
-                else:
-                    risk = base_risk
-
-                    if confidence_level == "low":
-                        risk += 0.25
-
-                    if answer_to_context_ratio > 0.20:
-                        risk += 0.15
-
-                    if score_spread < 0.15:
-                        risk += 0.10
-
-                    risk = max(0, min(risk, 1))
-                    hallucination_risk_score = round(risk, 4)
-
-                    if hallucination_risk_score >= 0.70:
-                        risk_level = "high"
-                    elif hallucination_risk_score >= 0.45:
-                        risk_level = "medium"
-                    else:
-                        risk_level = "low"
-
-                    self_healing_trigger = (risk_level == "high")
-                trace = {
-                    "query": query,
-                    "retrieved_chunk_ids": chunk_ids,
-                    "similarity_scores": similarity_scores,
-                    "mean_top_k_similarity": mean_top_k_similarity,
-                    "score_spread": score_spread,
-                    "retrieval_confidence_score": retrieval_confidence_score,
-                    "confidence_level": confidence_level,
-                    "answer_to_context_ratio": answer_to_context_ratio,
-                    "hallucination_risk_score": hallucination_risk_score,
-                    "risk_level": risk_level,
-                    "self_healing_trigger": self_healing_trigger,
-                    "top_k": int(top_k),
-                    "context_length_chars": context_length_chars,
-                    "retrieval_latency_ms": retrieval_latency_ms,
-                    "generation_latency_ms": generation_latency_ms,
-                    "total_latency_ms": total_latency_ms,
-                    "answer_length_chars": answer_length_chars,
-                    "refusal_detected": refusal_detected,
-                    "model_name": MODEL_ID,
-                    "embedding_model": EMBEDDING_MODEL,
-                }
-                append_trace(trace)
+                result = run_rag_pipeline(query, top_k)
+                print(f"Injected chunk IDs: {result.get('retrieved_chunk_ids', [])}")
+                print(f"Context length: {result.get('context_length', 0)} characters")
+                print("Answer:\n", result.get("answer", ""))
             except RuntimeError as exc:
                 print(f"Error: {exc}")
     except KeyboardInterrupt:

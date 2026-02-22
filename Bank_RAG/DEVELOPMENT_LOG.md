@@ -159,3 +159,7 @@
 - Added dashboard shell in dashboard/app.py with page config, live query placeholders, metric placeholders, and log explorer.
 - Utilities in dashboard/utils.py to safely load JSONL logs and format metrics.
 - Loads latest 10 entries from logs/rag_traces.jsonl into a dataframe; no charts or backend wiring yet.
+
+## Step 12 – Live Query Integration + Latency Instrumentation
+- Exposed run_rag_pipeline to return structured answers, confidence, risk, refusal flag, similarity scores, and latency breakdown while preserving existing guardrails and logging.
+- Wired dashboard/app.py submit action to invoke the RAG pipeline, surface real metrics, and display retrieval/generation/total latency in milliseconds with error handling.
