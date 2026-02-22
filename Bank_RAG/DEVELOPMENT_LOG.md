@@ -154,3 +154,8 @@
 - Adjustment: when refusal_detected is true, scale risk down (base_risk * 0.3, capped at 0.30), force low risk_level, and disable self_healing_trigger.
 - Distinction: only apply additional penalties (confidence low, long answers, narrow spread) when the model attempts an answer (no refusal), separating safe uncertainty from unsafe hallucination risk.
 - Rationale: improves signal precision for self-healing loops and maintains deterministic, rule-based behavior.
+
+## Step 11 – Streamlit Dashboard Skeleton Created
+- Added dashboard shell in dashboard/app.py with page config, live query placeholders, metric placeholders, and log explorer.
+- Utilities in dashboard/utils.py to safely load JSONL logs and format metrics.
+- Loads latest 10 entries from logs/rag_traces.jsonl into a dataframe; no charts or backend wiring yet.
