@@ -183,21 +183,39 @@ def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
     context_length_chars = len(context)
     answer_length_chars = len(answer)
     answer_to_context_ratio = round(answer_length_chars / context_length_chars, 4) if context_length_chars else 0.0
-    risk_score = 1 - retrieval_confidence_score
-    if (not (REFUSAL_PHRASE in answer)) and confidence_level == "low":
-        risk_score += 0.25
-    if answer_to_context_ratio > 0.20:
-        risk_score += 0.15
-    if score_spread < 0.15:
-        risk_score += 0.10
-    hallucination_risk_score = round(min(1.0, max(0.0, risk_score)), 4)
-    if hallucination_risk_score >= 0.70:
-        risk_level = "high"
-    elif hallucination_risk_score >= 0.45:
-        risk_level = "medium"
-    else:
+    refusal_detected = REFUSAL_PHRASE in answer
+    base_risk = 1 - retrieval_confidence_score
+
+    if refusal_detected:
+        hallucination_risk_score = min(base_risk * 0.3, 0.30)
+        hallucination_risk_score = round(hallucination_risk_score, 4)
+
         risk_level = "low"
-    self_healing_trigger = risk_level == "high"
+        self_healing_trigger = False
+
+    else:
+        risk = base_risk
+
+        if confidence_level == "low":
+            risk += 0.25
+
+        if answer_to_context_ratio > 0.20:
+            risk += 0.15
+
+        if score_spread < 0.15:
+            risk += 0.10
+
+        risk = max(0, min(risk, 1))
+        hallucination_risk_score = round(risk, 4)
+
+        if hallucination_risk_score >= 0.70:
+            risk_level = "high"
+        elif hallucination_risk_score >= 0.45:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+
+        self_healing_trigger = (risk_level == "high")
     trace = {
         "query": query,
         "retrieved_chunk_ids": chunk_ids,
@@ -216,7 +234,7 @@ def rag_answer(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object]:
         "generation_latency_ms": generation_latency_ms,
         "total_latency_ms": total_latency_ms,
         "answer_length_chars": answer_length_chars,
-        "refusal_detected": REFUSAL_PHRASE in answer,
+        "refusal_detected": refusal_detected,
         "model_name": MODEL_ID,
         "embedding_model": EMBEDDING_MODEL,
     }
@@ -286,21 +304,39 @@ def main() -> None:
                 answer_to_context_ratio = (
                     round(answer_length_chars / context_length_chars, 4) if context_length_chars else 0.0
                 )
-                risk_score = 1 - retrieval_confidence_score
-                if (not (REFUSAL_PHRASE in answer)) and confidence_level == "low":
-                    risk_score += 0.25
-                if answer_to_context_ratio > 0.20:
-                    risk_score += 0.15
-                if score_spread < 0.15:
-                    risk_score += 0.10
-                hallucination_risk_score = round(min(1.0, max(0.0, risk_score)), 4)
-                if hallucination_risk_score >= 0.70:
-                    risk_level = "high"
-                elif hallucination_risk_score >= 0.45:
-                    risk_level = "medium"
-                else:
+                refusal_detected = REFUSAL_PHRASE in answer
+                base_risk = 1 - retrieval_confidence_score
+
+                if refusal_detected:
+                    hallucination_risk_score = min(base_risk * 0.3, 0.30)
+                    hallucination_risk_score = round(hallucination_risk_score, 4)
+
                     risk_level = "low"
-                self_healing_trigger = risk_level == "high"
+                    self_healing_trigger = False
+
+                else:
+                    risk = base_risk
+
+                    if confidence_level == "low":
+                        risk += 0.25
+
+                    if answer_to_context_ratio > 0.20:
+                        risk += 0.15
+
+                    if score_spread < 0.15:
+                        risk += 0.10
+
+                    risk = max(0, min(risk, 1))
+                    hallucination_risk_score = round(risk, 4)
+
+                    if hallucination_risk_score >= 0.70:
+                        risk_level = "high"
+                    elif hallucination_risk_score >= 0.45:
+                        risk_level = "medium"
+                    else:
+                        risk_level = "low"
+
+                    self_healing_trigger = (risk_level == "high")
                 trace = {
                     "query": query,
                     "retrieved_chunk_ids": chunk_ids,
@@ -319,7 +355,7 @@ def main() -> None:
                     "generation_latency_ms": generation_latency_ms,
                     "total_latency_ms": total_latency_ms,
                     "answer_length_chars": answer_length_chars,
-                    "refusal_detected": REFUSAL_PHRASE in answer,
+                    "refusal_detected": refusal_detected,
                     "model_name": MODEL_ID,
                     "embedding_model": EMBEDDING_MODEL,
                 }

@@ -148,3 +148,9 @@
 - Heuristic rationale: low confidence without refusal suggests possible hallucination; long answers vs. context indicate drift; narrow score spread shows weak ranking separation—all elevate risk.
 - Deterministic choice: fixed rule set avoids randomness, keeps runs reproducible, and aligns with existing deterministic guardrails.
 - Self-healing prep: risk_level (high/medium/low) and self_healing_trigger flag future hooks for retries, prompt tightening, or fallbacks.
+
+## Step 10 Refinement – Refusal-Aware Risk Adjustment
+- Issue: original heuristic penalized low-confidence responses even when the model correctly refused, over-triggering self-healing.
+- Adjustment: when refusal_detected is true, scale risk down (base_risk * 0.3, capped at 0.30), force low risk_level, and disable self_healing_trigger.
+- Distinction: only apply additional penalties (confidence low, long answers, narrow spread) when the model attempts an answer (no refusal), separating safe uncertainty from unsafe hallucination risk.
+- Rationale: improves signal precision for self-healing loops and maintains deterministic, rule-based behavior.
