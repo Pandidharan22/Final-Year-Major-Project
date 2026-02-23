@@ -163,3 +163,8 @@
 ## Step 12 – Live Query Integration + Latency Instrumentation
 - Exposed run_rag_pipeline to return structured answers, confidence, risk, refusal flag, similarity scores, and latency breakdown while preserving existing guardrails and logging.
 - Wired dashboard/app.py submit action to invoke the RAG pipeline, surface real metrics, and display retrieval/generation/total latency in milliseconds with error handling.
+
+## Step 13 – Similarity Visualization + Trust/Risk Indicator Added
+- Added Plotly bar chart for Top-K similarity scores in the dashboard.
+- Added dual Plotly gauges for retrieval confidence and hallucination risk with color thresholds.
+- Updated dashboard framing/title to emphasize autonomous self-healing monitoring.

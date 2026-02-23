@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from utils import load_logs, format_metric
@@ -15,8 +17,8 @@ st.set_page_config(page_title="BANK_RAG Observability Dashboard", layout="wide")
 # Paths
 LOG_PATH = BASE_DIR / "logs" / "rag_traces.jsonl"
 
-st.title("BANK_RAG Observability Dashboard")
-st.caption("Step 2: Live RAG integration with latency instrumentation.")
+st.title("Autonomous Self-Healing LLM Ops Dashboard")
+st.caption("Semantic Validation • Trust Scoring • Self-Healing Monitoring")
 
 # Section 1: Live Query Interface
 section_live = st.container()
@@ -49,6 +51,8 @@ with section_live:
     latency_generation = "(placeholder)"
     latency_total = "(placeholder)"
 
+    similarity_scores = None
+
     if result:
         answer_value = result.get("answer", "")
         retrieval_confidence_value = format_metric(result.get("retrieval_confidence"))
@@ -61,6 +65,7 @@ with section_live:
         latency_retrieval = format_metric(latency.get("retrieval_ms"), precision=2)
         latency_generation = format_metric(latency.get("generation_ms"), precision=2)
         latency_total = format_metric(latency.get("total_ms"), precision=2)
+        similarity_scores = result.get("similarity_scores")
 
     cols = st.columns(3)
     with cols[0]:
@@ -93,6 +98,103 @@ with section_live:
 
     if error_msg:
         st.error(error_msg)
+
+# Similarity Scores Visualization
+st.subheader("Top-K Retrieval Similarity Scores")
+if result and similarity_scores:
+    ranked_scores = sorted(enumerate(similarity_scores, start=1), key=lambda kv: kv[1], reverse=True)
+    ranks = [f"Rank {idx}" for idx, _ in ranked_scores]
+    scores = [score for _, score in ranked_scores]
+
+    fig_sim = px.bar(
+        x=scores,
+        y=ranks,
+        orientation="h",
+        labels={"x": "Similarity", "y": "Rank"},
+        text=[f"{s:.4f}" for s in scores],
+        title="Top-K Retrieval Similarity Scores",
+    )
+    fig_sim.update_layout(
+        yaxis=dict(autorange="reversed"),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        showlegend=False,
+        margin=dict(l=80, r=40, t=60, b=40),
+    )
+    fig_sim.update_xaxes(showgrid=True, gridcolor="#f0f0f0")
+    fig_sim.update_yaxes(showgrid=False)
+    st.plotly_chart(fig_sim, use_container_width=True)
+elif submit and not error_msg:
+    st.info("No similarity scores returned for this query.")
+else:
+    st.write("Run a query to view similarity scores.")
+
+# Confidence vs Risk Indicator
+st.subheader("Confidence vs Risk Indicator")
+
+def _gauge_color_conf(value: float) -> str:
+    if value >= 0.75:
+        return "#4caf50"  # green
+    if value >= 0.50:
+        return "#fbc02d"  # yellow
+    return "#e53935"  # red
+
+
+def _gauge_color_risk(value: float) -> str:
+    if value < 0.30:
+        return "#4caf50"  # green
+    if value <= 0.60:
+        return "#fbc02d"  # yellow
+    return "#e53935"  # red
+
+
+conf_val = float(result.get("retrieval_confidence", 0)) if result else 0.0
+risk_val = float(result.get("hallucination_risk", 0)) if result else 0.0
+
+col_conf, col_risk = st.columns(2)
+with col_conf:
+    st.caption("System Trust Confidence")
+    fig_conf = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=conf_val,
+            number={"valueformat": ".4f"},
+            gauge={
+                "axis": {"range": [0, 1]},
+                "bar": {"color": _gauge_color_conf(conf_val)},
+                "steps": [
+                    {"range": [0, 0.5], "color": "#fdecea"},
+                    {"range": [0.5, 0.75], "color": "#fff4e5"},
+                    {"range": [0.75, 1], "color": "#e8f5e9"},
+                ],
+            },
+            title={"text": "Retrieval Confidence Score"},
+        )
+    )
+    fig_conf.update_layout(margin=dict(l=10, r=10, t=50, b=10))
+    st.plotly_chart(fig_conf, use_container_width=True)
+
+with col_risk:
+    st.caption("Hallucination Risk Index")
+    fig_risk = go.Figure(
+        go.Indicator(
+            mode="gauge+number",
+            value=risk_val,
+            number={"valueformat": ".4f"},
+            gauge={
+                "axis": {"range": [0, 1]},
+                "bar": {"color": _gauge_color_risk(risk_val)},
+                "steps": [
+                    {"range": [0, 0.3], "color": "#e8f5e9"},
+                    {"range": [0.3, 0.6], "color": "#fff4e5"},
+                    {"range": [0.6, 1], "color": "#fdecea"},
+                ],
+            },
+            title={"text": "Hallucination Risk Score"},
+        )
+    )
+    fig_risk.update_layout(margin=dict(l=10, r=10, t=50, b=10))
+    st.plotly_chart(fig_risk, use_container_width=True)
 
 # Section 2: Similarity Scores Visualization (placeholder)
 st.subheader("Similarity Scores Visualization")
