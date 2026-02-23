@@ -12,7 +12,8 @@ if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
 from src.rag import run_rag_pipeline  # noqa: E402
-st.set_page_config(page_title="BANK_RAG Observability Dashboard", layout="wide")
+from src.evaluate import get_evaluation_summary  # noqa: E402
+st.set_page_config(page_title="Autonomous Self-Healing LLM Ops Dashboard", layout="wide")
 
 # Paths
 LOG_PATH = BASE_DIR / "logs" / "rag_traces.jsonl"
@@ -196,21 +197,108 @@ with col_risk:
     fig_risk.update_layout(margin=dict(l=10, r=10, t=50, b=10))
     st.plotly_chart(fig_risk, use_container_width=True)
 
-# Section 2: Similarity Scores Visualization (placeholder)
-st.subheader("Similarity Scores Visualization")
-st.write("(placeholder for charts)")
+# Latency Analytics
+st.subheader("Latency Analytics")
+logs_all = load_logs(LOG_PATH)
 
-# Section 3: Confidence vs Risk Indicator (placeholder)
-st.subheader("Confidence vs Risk Indicator")
-st.write("(placeholder for charts)")
+if logs_all:
+    retrieval_latencies = [float(item.get("retrieval_latency_ms", 0.0)) for item in logs_all]
+    generation_latencies = [float(item.get("generation_latency_ms", 0.0)) for item in logs_all]
+    total_latencies = [float(item.get("total_latency_ms", 0.0)) for item in logs_all]
 
-# Section 4: Latency Metrics (placeholder)
-st.subheader("Latency Metrics")
-st.write("(placeholder for charts)")
+    def _percentile(vals, percentile: float) -> float:
+        if not vals:
+            return 0.0
+        sorted_vals = sorted(vals)
+        k = (len(sorted_vals) - 1) * percentile
+        f = int(k)
+        c = min(f + 1, len(sorted_vals) - 1)
+        if f == c:
+            return sorted_vals[int(k)]
+        return sorted_vals[f] + (sorted_vals[c] - sorted_vals[f]) * (k - f)
 
-# Section 5: Evaluation Metrics Summary (placeholder)
+    import statistics
+
+    mean_total = statistics.mean(total_latencies) if total_latencies else 0.0
+    median_total = statistics.median(total_latencies) if total_latencies else 0.0
+    p95_total = _percentile(total_latencies, 0.95) if total_latencies else 0.0
+    max_total = max(total_latencies) if total_latencies else 0.0
+
+    kpi_cols = st.columns(3)
+    kpi_cols[0].metric("Avg Total Latency (ms)", f"{mean_total:.2f}")
+    kpi_cols[1].metric("P95 Total Latency (ms)", f"{p95_total:.2f}")
+    kpi_cols[2].metric("Max Total Latency (ms)", f"{max_total:.2f}")
+
+    fig_hist = px.histogram(
+        total_latencies,
+        nbins=min(30, max(10, int(len(total_latencies) ** 0.5))),
+        labels={"value": "Total Latency (ms)", "count": "Count"},
+        title="Total Latency Distribution (ms)",
+    )
+    fig_hist.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        bargap=0.05,
+        margin=dict(l=40, r=40, t=60, b=40),
+    )
+    fig_hist.update_xaxes(showgrid=True, gridcolor="#f0f0f0")
+    fig_hist.update_yaxes(showgrid=True, gridcolor="#f6f6f6")
+
+    mean_retrieval = statistics.mean(retrieval_latencies) if retrieval_latencies else 0.0
+    mean_generation = statistics.mean(generation_latencies) if generation_latencies else 0.0
+    fig_lat_comp = px.bar(
+        x=["Retrieval", "Generation"],
+        y=[mean_retrieval, mean_generation],
+        labels={"x": "Stage", "y": "Mean Latency (ms)"},
+        title="Retrieval vs Generation Latency (Mean)",
+    )
+    fig_lat_comp.update_traces(marker_color=["#4caf50", "#2196f3"], text=[f"{mean_retrieval:.2f}", f"{mean_generation:.2f}"], textposition="outside")
+    fig_lat_comp.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        showlegend=False,
+        margin=dict(l=40, r=40, t=60, b=40),
+        yaxis=dict(title="Mean Latency (ms)", gridcolor="#f0f0f0"),
+    )
+
+    st.plotly_chart(fig_hist, use_container_width=True)
+    st.plotly_chart(fig_lat_comp, use_container_width=True)
+else:
+    st.warning("No latency data available in logs.")
+
+# Evaluation Metrics Summary
 st.subheader("Evaluation Metrics Summary")
-st.write("(placeholder for metrics)")
+eval_summary = get_evaluation_summary()
+
+acc = eval_summary.get("accuracy", 0.0)
+avg_conf = eval_summary.get("avg_confidence", 0.0)
+avg_risk = eval_summary.get("avg_risk", 0.0)
+refusal_rate = eval_summary.get("refusal_rate", 0.0)
+self_heal_rate = eval_summary.get("self_healing_trigger_rate", 0.0)
+
+metric_cols = st.columns(5)
+metric_cols[0].metric("Evaluation Accuracy", f"{acc*100:.2f}%")
+metric_cols[1].metric("Average Trust Confidence", f"{avg_conf:.4f}")
+metric_cols[2].metric("Average Hallucination Risk", f"{avg_risk:.4f}")
+metric_cols[3].metric("Refusal Rate", f"{refusal_rate*100:.2f}%")
+metric_cols[4].metric("Self-Healing Trigger Rate", f"{self_heal_rate*100:.2f}%")
+
+fig_eval = px.bar(
+    x=["Accuracy", "Avg Confidence", "Avg Risk"],
+    y=[acc, avg_conf, avg_risk],
+    labels={"x": "Metric", "y": "Value"},
+    title="Evaluation Performance Metrics",
+    text=[f"{acc:.4f}", f"{avg_conf:.4f}", f"{avg_risk:.4f}"],
+)
+fig_eval.update_traces(marker_color=["#4caf50", "#2196f3", "#e53935"], textposition="outside")
+fig_eval.update_layout(
+    plot_bgcolor="white",
+    paper_bgcolor="white",
+    showlegend=False,
+    margin=dict(l=40, r=40, t=60, b=40),
+    yaxis=dict(range=[0, 1], gridcolor="#f0f0f0"),
+)
+st.plotly_chart(fig_eval, use_container_width=True)
 
 # Section 6: Logs Explorer
 logs_container = st.container()

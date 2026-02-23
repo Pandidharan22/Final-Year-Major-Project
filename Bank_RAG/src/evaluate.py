@@ -11,6 +11,71 @@ from src.rag import LOG_PATH, rag_answer  # noqa: E402
 from src.retrieve import CHUNKS_DIR, load_chunks  # noqa: E402
 
 
+def get_evaluation_summary() -> Dict[str, float]:
+    """Compute simple evaluation summary metrics from existing logs or stored metrics.
+
+    Returns a dictionary with accuracy, average confidence, average risk, refusal rate,
+    and self-healing trigger rate. If an evaluation metrics file exists under
+    evaluation/metrics.json with an `accuracy` key, it is used; otherwise, accuracy is
+    estimated as (1 - avg_risk), bounded to [0, 1].
+    """
+
+    metrics_path = BASE_DIR / "evaluation" / "metrics.json"
+    if metrics_path.exists():
+        try:
+            with metrics_path.open("r", encoding="utf-8") as handle:
+                stored = json.load(handle)
+            accuracy_val = float(stored.get("accuracy", 0.0))
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            accuracy_val = 0.0
+    else:
+        accuracy_val = 0.0
+
+    logs: List[Dict[str, object]] = []
+    if LOG_PATH.exists():
+        with LOG_PATH.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    if isinstance(obj, dict):
+                        logs.append(obj)
+                except json.JSONDecodeError:
+                    continue
+
+    if not logs:
+        return {
+            "accuracy": accuracy_val,
+            "avg_confidence": 0.0,
+            "avg_risk": 0.0,
+            "refusal_rate": 0.0,
+            "self_healing_trigger_rate": 0.0,
+        }
+
+    confidences = [float(item.get("retrieval_confidence_score", 0.0)) for item in logs]
+    risks = [float(item.get("hallucination_risk_score", 0.0)) for item in logs]
+    refusals = [bool(item.get("refusal_detected", False)) for item in logs]
+    self_heal = [bool(item.get("self_healing_trigger", False)) for item in logs]
+
+    avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
+    avg_risk = sum(risks) / len(risks) if risks else 0.0
+    refusal_rate = sum(1 for r in refusals if r) / len(refusals) if refusals else 0.0
+    self_heal_rate = sum(1 for s in self_heal if s) / len(self_heal) if self_heal else 0.0
+
+    if accuracy_val == 0.0 and avg_risk:
+        accuracy_val = max(0.0, min(1.0, 1.0 - avg_risk))
+
+    return {
+        "accuracy": accuracy_val,
+        "avg_confidence": avg_conf,
+        "avg_risk": avg_risk,
+        "refusal_rate": refusal_rate,
+        "self_healing_trigger_rate": self_heal_rate,
+    }
+
+
 def load_questions(path: Path) -> List[Dict[str, object]]:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)

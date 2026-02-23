@@ -168,3 +168,8 @@
 - Added Plotly bar chart for Top-K similarity scores in the dashboard.
 - Added dual Plotly gauges for retrieval confidence and hallucination risk with color thresholds.
 - Updated dashboard framing/title to emphasize autonomous self-healing monitoring.
+
+## Step 14 – Latency Analytics + Evaluation Metrics Dashboard Added
+- Added latency analytics section: KPI metrics (avg/p95/max total latency), histogram of total latency, and mean retrieval vs generation latency comparison.
+- Added evaluation metrics summary cards (accuracy, confidence, risk, refusal rate, self-healing trigger rate) and bar chart.
+- Exposed get_evaluation_summary in evaluate.py to surface evaluation/trace-derived aggregates without altering core pipeline logic.
