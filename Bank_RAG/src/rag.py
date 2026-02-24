@@ -91,14 +91,16 @@ def _run_single_pass(
     else:
         risk = base_risk
 
-        if confidence_level == "low":
-            risk += 0.25
+        # Scaled low-confidence penalty
+        risk += 0.5 * (1 - retrieval_confidence_score) * 0.5
 
-        if answer_to_context_ratio > 0.20:
-            risk += 0.15
+        # Scaled spread penalty
+        spread_gap = max(0, 0.15 - score_spread)
+        risk += 0.3 * spread_gap
 
-        if score_spread < 0.15:
-            risk += 0.10
+        # Scaled ratio penalty
+        ratio_gap = max(0, answer_to_context_ratio - 0.20)
+        risk += 0.2 * ratio_gap
 
         risk = max(0, min(risk, 1))
         hallucination_risk_score = round(risk, 4)
