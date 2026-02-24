@@ -173,3 +173,10 @@
 - Added latency analytics section: KPI metrics (avg/p95/max total latency), histogram of total latency, and mean retrieval vs generation latency comparison.
 - Added evaluation metrics summary cards (accuracy, confidence, risk, refusal rate, self-healing trigger rate) and bar chart.
 - Exposed get_evaluation_summary in evaluate.py to surface evaluation/trace-derived aggregates without altering core pipeline logic.
+
+## Step 11 – Adaptive Self-Healing via Top-K Expansion
+- Trigger: self_healing_trigger is true and refusal_detected is false after the first pass.
+- Strategy: perform a single deterministic retry with top_k=8, rebuild context, regenerate answer, and recompute confidence/risk.
+- Selection: adopt retry output only if retry hallucination risk is lower than the original; otherwise keep the first pass.
+- Logging: trace records retry_attempted, retry_top_k, retry_improved, final_risk_score, final_risk_level, and retains both attempt metrics.
+- Rationale: top-k expansion broadens context to reduce hallucination risk while remaining deterministic; limited to one retry to bound cost and complexity.

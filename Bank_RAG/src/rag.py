@@ -39,6 +39,103 @@ SYSTEM_PROMPT = (
 )
 
 
+def _run_single_pass(
+    query: str,
+    top_k: int,
+    token: str,
+    model,
+    index,
+    chunks: List[Dict[str, object]],
+    chunk_map: Dict[str, Dict[str, object]],
+) -> Dict[str, object]:
+    total_start = time.perf_counter()
+
+    retrieval_start = time.perf_counter()
+    results = retrieve(query, top_k, model, index, chunks)
+    retrieval_latency_ms = (time.perf_counter() - retrieval_start) * 1000.0
+
+    chunk_ids = [item["chunk_id"] for item in results]
+    chunk_texts = [chunk_map[cid]["text"] for cid in chunk_ids if cid in chunk_map]
+
+    context = format_context(chunk_texts)
+    prompt = prepare_prompt(context, query)
+
+    generation_start = time.perf_counter()
+    answer = call_hf_inference(token, prompt)
+    generation_latency_ms = (time.perf_counter() - generation_start) * 1000.0
+    total_latency_ms = (time.perf_counter() - total_start) * 1000.0
+
+    similarity_scores = [float(item.get("score", 0.0)) for item in results]
+    mean_top_k_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
+    score_spread = similarity_scores[0] - similarity_scores[-1] if similarity_scores else 0.0
+    retrieval_confidence_score = round((0.7 * mean_top_k_similarity) + (0.3 * score_spread), 4)
+    if retrieval_confidence_score >= 0.55:
+        confidence_level = "high"
+    elif retrieval_confidence_score >= 0.40:
+        confidence_level = "medium"
+    else:
+        confidence_level = "low"
+    context_length_chars = len(context)
+    answer_length_chars = len(answer)
+    answer_to_context_ratio = round(answer_length_chars / context_length_chars, 4) if context_length_chars else 0.0
+    refusal_detected = REFUSAL_PHRASE in answer
+    base_risk = 1 - retrieval_confidence_score
+
+    if refusal_detected:
+        hallucination_risk_score = min(base_risk * 0.3, 0.30)
+        hallucination_risk_score = round(hallucination_risk_score, 4)
+
+        risk_level = "low"
+        self_healing_trigger = False
+
+    else:
+        risk = base_risk
+
+        if confidence_level == "low":
+            risk += 0.25
+
+        if answer_to_context_ratio > 0.20:
+            risk += 0.15
+
+        if score_spread < 0.15:
+            risk += 0.10
+
+        risk = max(0, min(risk, 1))
+        hallucination_risk_score = round(risk, 4)
+
+        if hallucination_risk_score >= 0.70:
+            risk_level = "high"
+        elif hallucination_risk_score >= 0.45:
+            risk_level = "medium"
+        else:
+            risk_level = "low"
+
+        self_healing_trigger = (risk_level == "high")
+
+    return {
+        "answer": answer,
+        "chunk_ids": chunk_ids,
+        "similarity_scores": similarity_scores,
+        "mean_top_k_similarity": mean_top_k_similarity,
+        "score_spread": score_spread,
+        "retrieval_confidence_score": retrieval_confidence_score,
+        "confidence_level": confidence_level,
+        "answer_to_context_ratio": answer_to_context_ratio,
+        "hallucination_risk_score": hallucination_risk_score,
+        "risk_level": risk_level,
+        "self_healing_trigger": self_healing_trigger,
+        "top_k": top_k,
+        "context_length_chars": context_length_chars,
+        "retrieval_latency_ms": retrieval_latency_ms,
+        "generation_latency_ms": generation_latency_ms,
+        "total_latency_ms": total_latency_ms,
+        "answer_length_chars": answer_length_chars,
+        "refusal_detected": refusal_detected,
+        "model_name": MODEL_ID,
+        "embedding_model": EMBEDDING_MODEL,
+    }
+
+
 def build_chunk_map(chunks: List[Dict[str, object]]) -> Dict[str, Dict[str, object]]:
     return {entry.get("chunk_id", ""): entry for entry in chunks}
 
@@ -148,116 +245,101 @@ def run_rag_pipeline(query: str, top_k: int = DEFAULT_TOP_K) -> Dict[str, object
     if not token:
         raise RuntimeError("HF_API_TOKEN is missing. Please set it in Bank_RAG/.env.")
 
-    total_start = time.perf_counter()
     set_determinism()
     model = build_model()
     chunks = load_chunks(base_dir / CHUNKS_DIR)
     chunk_map = build_chunk_map(chunks)
     index, metadata = load_index_and_metadata(base_dir)
 
-    retrieval_start = time.perf_counter()
-    results = retrieve(query, top_k, model, index, chunks)
-    retrieval_latency_ms = (time.perf_counter() - retrieval_start) * 1000.0
+    first_run = _run_single_pass(query, top_k, token, model, index, chunks, chunk_map)
 
-    chunk_ids = [item["chunk_id"] for item in results]
-    chunk_texts = [chunk_map[cid]["text"] for cid in chunk_ids if cid in chunk_map]
+    retry_attempted = False
+    retry_top_k: Optional[int] = None
+    retry_improved = False
+    retry_run: Optional[Dict[str, object]] = None
 
-    context = format_context(chunk_texts)
-    prompt = prepare_prompt(context, query)
-
-    generation_start = time.perf_counter()
-    answer = call_hf_inference(token, prompt)
-    generation_latency_ms = (time.perf_counter() - generation_start) * 1000.0
-    total_latency_ms = (time.perf_counter() - total_start) * 1000.0
-
-    similarity_scores = [float(item.get("score", 0.0)) for item in results]
-    mean_top_k_similarity = sum(similarity_scores) / len(similarity_scores) if similarity_scores else 0.0
-    score_spread = similarity_scores[0] - similarity_scores[-1] if similarity_scores else 0.0
-    retrieval_confidence_score = round((0.7 * mean_top_k_similarity) + (0.3 * score_spread), 4)
-    if retrieval_confidence_score >= 0.55:
-        confidence_level = "high"
-    elif retrieval_confidence_score >= 0.40:
-        confidence_level = "medium"
-    else:
-        confidence_level = "low"
-    context_length_chars = len(context)
-    answer_length_chars = len(answer)
-    answer_to_context_ratio = round(answer_length_chars / context_length_chars, 4) if context_length_chars else 0.0
-    refusal_detected = REFUSAL_PHRASE in answer
-    base_risk = 1 - retrieval_confidence_score
-
-    if refusal_detected:
-        hallucination_risk_score = min(base_risk * 0.3, 0.30)
-        hallucination_risk_score = round(hallucination_risk_score, 4)
-
-        risk_level = "low"
-        self_healing_trigger = False
-
-    else:
-        risk = base_risk
-
-        if confidence_level == "low":
-            risk += 0.25
-
-        if answer_to_context_ratio > 0.20:
-            risk += 0.15
-
-        if score_spread < 0.15:
-            risk += 0.10
-
-        risk = max(0, min(risk, 1))
-        hallucination_risk_score = round(risk, 4)
-
-        if hallucination_risk_score >= 0.70:
-            risk_level = "high"
-        elif hallucination_risk_score >= 0.45:
-            risk_level = "medium"
+    if first_run["self_healing_trigger"] and not first_run["refusal_detected"]:
+        retry_attempted = True
+        retry_top_k = 8
+        retry_run = _run_single_pass(query, retry_top_k, token, model, index, chunks, chunk_map)
+        if retry_run["hallucination_risk_score"] < first_run["hallucination_risk_score"]:
+            retry_improved = True
+            final_run = retry_run
         else:
-            risk_level = "low"
+            final_run = first_run
+    else:
+        final_run = first_run
 
-        self_healing_trigger = (risk_level == "high")
     trace = {
         "query": query,
-        "retrieved_chunk_ids": chunk_ids,
-        "similarity_scores": similarity_scores,
-        "mean_top_k_similarity": mean_top_k_similarity,
-        "score_spread": score_spread,
-        "retrieval_confidence_score": retrieval_confidence_score,
-        "confidence_level": confidence_level,
-        "answer_to_context_ratio": answer_to_context_ratio,
-        "hallucination_risk_score": hallucination_risk_score,
-        "risk_level": risk_level,
-        "self_healing_trigger": self_healing_trigger,
-        "top_k": int(top_k),
-        "context_length_chars": context_length_chars,
-        "retrieval_latency_ms": retrieval_latency_ms,
-        "generation_latency_ms": generation_latency_ms,
-        "total_latency_ms": total_latency_ms,
-        "answer_length_chars": answer_length_chars,
-        "refusal_detected": refusal_detected,
+        "retrieved_chunk_ids": first_run["chunk_ids"],
+        "similarity_scores": first_run["similarity_scores"],
+        "mean_top_k_similarity": first_run["mean_top_k_similarity"],
+        "score_spread": first_run["score_spread"],
+        "retrieval_confidence_score": first_run["retrieval_confidence_score"],
+        "confidence_level": first_run["confidence_level"],
+        "answer_to_context_ratio": first_run["answer_to_context_ratio"],
+        "hallucination_risk_score": first_run["hallucination_risk_score"],
+        "risk_level": first_run["risk_level"],
+        "self_healing_trigger": first_run["self_healing_trigger"],
+        "top_k": int(first_run["top_k"]),
+        "context_length_chars": first_run["context_length_chars"],
+        "retrieval_latency_ms": first_run["retrieval_latency_ms"],
+        "generation_latency_ms": first_run["generation_latency_ms"],
+        "total_latency_ms": first_run["total_latency_ms"],
+        "answer_length_chars": first_run["answer_length_chars"],
+        "refusal_detected": first_run["refusal_detected"],
         "model_name": MODEL_ID,
         "embedding_model": EMBEDDING_MODEL,
+        "retry_attempted": retry_attempted,
+        "retry_top_k": retry_top_k,
+        "retry_improved": retry_improved,
+        "final_risk_score": final_run["hallucination_risk_score"],
+        "final_risk_level": final_run["risk_level"],
     }
+
+    if retry_run:
+        trace.update(
+            {
+                "retry_retrieved_chunk_ids": retry_run["chunk_ids"],
+                "retry_similarity_scores": retry_run["similarity_scores"],
+                "retry_mean_top_k_similarity": retry_run["mean_top_k_similarity"],
+                "retry_score_spread": retry_run["score_spread"],
+                "retry_retrieval_confidence_score": retry_run["retrieval_confidence_score"],
+                "retry_confidence_level": retry_run["confidence_level"],
+                "retry_answer_to_context_ratio": retry_run["answer_to_context_ratio"],
+                "retry_hallucination_risk_score": retry_run["hallucination_risk_score"],
+                "retry_risk_level": retry_run["risk_level"],
+                "retry_self_healing_trigger": retry_run["self_healing_trigger"],
+                "retry_context_length_chars": retry_run["context_length_chars"],
+                "retry_retrieval_latency_ms": retry_run["retrieval_latency_ms"],
+                "retry_generation_latency_ms": retry_run["generation_latency_ms"],
+                "retry_total_latency_ms": retry_run["total_latency_ms"],
+                "retry_answer_length_chars": retry_run["answer_length_chars"],
+                "retry_refusal_detected": retry_run["refusal_detected"],
+            }
+        )
+
     append_trace(trace)
 
     return {
-        "answer": answer,
-        "retrieval_confidence": retrieval_confidence_score,
-        "confidence_level": confidence_level,
-        "hallucination_risk": hallucination_risk_score,
-        "risk_level": risk_level,
-        "self_healing_triggered": self_healing_trigger,
-        "refusal_detected": refusal_detected,
+        "answer": final_run["answer"],
+        "retrieval_confidence": final_run["retrieval_confidence_score"],
+        "confidence_level": final_run["confidence_level"],
+        "hallucination_risk": final_run["hallucination_risk_score"],
+        "risk_level": final_run["risk_level"],
+        "self_healing_triggered": final_run["self_healing_trigger"],
+        "refusal_detected": final_run["refusal_detected"],
         "latency": {
-            "retrieval_ms": retrieval_latency_ms,
-            "generation_ms": generation_latency_ms,
-            "total_ms": total_latency_ms,
+            "retrieval_ms": final_run["retrieval_latency_ms"],
+            "generation_ms": final_run["generation_latency_ms"],
+            "total_ms": final_run["total_latency_ms"],
         },
-        "similarity_scores": similarity_scores,
-        "retrieved_chunk_ids": chunk_ids,
+        "similarity_scores": final_run["similarity_scores"],
+        "retrieved_chunk_ids": final_run["chunk_ids"],
         "query": query,
-        "context_length": len(context),
-        "top_k": int(top_k),
+        "context_length": final_run["context_length_chars"],
+        "top_k": int(final_run["top_k"]),
     }
 
 
