@@ -180,3 +180,19 @@
 - Selection: adopt retry output only if retry hallucination risk is lower than the original; otherwise keep the first pass.
 - Logging: trace records retry_attempted, retry_top_k, retry_improved, final_risk_score, final_risk_level, and retains both attempt metrics.
 - Rationale: top-k expansion broadens context to reduce hallucination risk while remaining deterministic; limited to one retry to bound cost and complexity.
+
+## Step 12 – Risk Calibration via Proportional Penalty Scaling
+- Issue: fixed penalty jumps overstated risk for some broad explanatory answers.
+- Change: replace hard adds with scaled penalties (confidence gap, spread gap, answer/context ratio gap) while keeping refusal override intact.
+- Impact: smoother risk response for nuanced long-form answers; thresholds unchanged; self-healing still fires only at high risk.
+- Rationale: proportional weighting better reflects contribution of each signal and reduces over-penalization when signals are only mildly adverse.
+
+## Step 12B – Nonlinear Risk Compression via Quadratic Base
+- Why linear base overestimated uncertainty: base_risk = (1 - confidence) treated medium confidence (e.g., 0.40) as 0.60 risk before penalties, allowing base to dominate even when signals were only moderately weak.
+- Why quadratic compression improves calibration: squaring (base_risk = (1 - confidence)^2) down-weights mid-range uncertainty while leaving truly low confidence (e.g., 0.10) still high, so scaled penalties drive risk instead of the base overwhelming them.
+- Numerical comparison: at confidence 0.40, linear base is 0.60 but quadratic base is 0.36; at confidence 0.20, linear is 0.80 vs quadratic 0.64—high uncertainty stays high, but mid confidence no longer swamps proportional penalties.
+
+## Step 5 – Self-Healing Observability Layer Added
+- What was added: dashboard analytics for self-healing triggers (pie + KPI), failure pattern breakdown (high risk, low confidence, refusals), risk vs confidence scatter with reference line, refusal distribution, and conditional stability trend (skipped when timestamps absent).
+- Data source: reuses logs/rag_traces.jsonl without backend changes; honors existing self-healing trigger and risk/confidence fields.
+- Why it matters: surfaces guardrail activation rate, highlights dominant failure modes, and visualizes calibration between trust and risk to guide future tuning.

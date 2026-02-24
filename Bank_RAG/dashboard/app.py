@@ -300,6 +300,127 @@ fig_eval.update_layout(
 )
 st.plotly_chart(fig_eval, use_container_width=True)
 
+# Autonomous Self-Healing Analytics
+st.subheader("Autonomous Self-Healing Analytics")
+
+def _final_risk(entry: dict) -> float:
+    if entry.get("final_risk_score") is not None:
+        try:
+            return float(entry.get("final_risk_score", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+    try:
+        return float(entry.get("hallucination_risk_score", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+if logs_all:
+    total_queries = len(logs_all)
+    trigger_flags = [bool(item.get("self_healing_trigger")) for item in logs_all]
+    trigger_count = sum(1 for flag in trigger_flags if flag)
+    trigger_rate = trigger_count / total_queries if total_queries else 0.0
+
+    # Part 1: Self-Healing Trigger Analytics
+    col_trigger_pie, col_trigger_kpi = st.columns([2, 1])
+    with col_trigger_pie:
+        fig_trigger = px.pie(
+            names=["Triggered", "Not Triggered"],
+            values=[trigger_count, max(total_queries - trigger_count, 0)],
+            title="Self-Healing Activation Distribution",
+            color=["Triggered", "Not Triggered"],
+            color_discrete_map={"Triggered": "#4caf50", "Not Triggered": "#e0e0e0"},
+        )
+        fig_trigger.update_layout(margin=dict(l=20, r=20, t=60, b=20))
+        st.plotly_chart(fig_trigger, use_container_width=True)
+    with col_trigger_kpi:
+        st.metric("Self-Healing Trigger Rate", f"{trigger_rate*100:.2f}%")
+
+    # Part 2: Failure Pattern Detection
+    risks = [_final_risk(item) for item in logs_all]
+    confidences = [float(item.get("retrieval_confidence_score", 0.0)) for item in logs_all]
+    refusals = [bool(item.get("refusal_detected")) for item in logs_all]
+
+    high_risk_count = sum(1 for r in risks if r > 0.6)
+    low_conf_count = sum(1 for c in confidences if c < 0.5)
+    refusal_count = sum(1 for flag in refusals if flag)
+
+    fig_failure = px.bar(
+        x=["High Risk (>0.6)", "Low Confidence (<0.5)", "Refusal Detected"],
+        y=[high_risk_count, low_conf_count, refusal_count],
+        labels={"x": "Pattern", "y": "Count"},
+        title="Failure Pattern Breakdown",
+        text=[high_risk_count, low_conf_count, refusal_count],
+    )
+    fig_failure.update_traces(marker_color=["#e53935", "#fbc02d", "#1976d2"], textposition="outside")
+    fig_failure.update_layout(
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        showlegend=False,
+        margin=dict(l=40, r=40, t=60, b=40),
+        yaxis=dict(gridcolor="#f0f0f0"),
+    )
+    st.plotly_chart(fig_failure, use_container_width=True)
+
+    # Part 3: Risk vs Confidence Correlation
+    fig_scatter = px.scatter(
+        x=confidences,
+        y=risks,
+        labels={"x": "Confidence", "y": "Risk"},
+        title="Trust vs Hallucination Risk Correlation",
+    )
+    fig_scatter.add_trace(
+        go.Scatter(x=[0, 1], y=[0, 1], mode="lines", name="y = x", line=dict(color="#9e9e9e", dash="dash"))
+    )
+    fig_scatter.update_layout(plot_bgcolor="white", paper_bgcolor="white", margin=dict(l=40, r=40, t=60, b=40))
+    fig_scatter.update_xaxes(showgrid=True, gridcolor="#f0f0f0", range=[0, 1])
+    fig_scatter.update_yaxes(showgrid=True, gridcolor="#f6f6f6", range=[0, 1])
+    st.plotly_chart(fig_scatter, use_container_width=True)
+
+    # Part 4: Refusal Distribution
+    refusal_rate = refusal_count / total_queries if total_queries else 0.0
+    fig_refusal = px.pie(
+        names=["Refusal", "Non-Refusal"],
+        values=[refusal_count, max(total_queries - refusal_count, 0)],
+        title="Guardrail Refusal Distribution",
+        color=["Refusal", "Non-Refusal"],
+        color_discrete_map={"Refusal": "#1976d2", "Non-Refusal": "#e0e0e0"},
+    )
+    fig_refusal.update_layout(margin=dict(l=20, r=20, t=60, b=20))
+    col_refusal_pie, col_refusal_kpi = st.columns([2, 1])
+    with col_refusal_pie:
+        st.plotly_chart(fig_refusal, use_container_width=True)
+    with col_refusal_kpi:
+        st.metric("Refusal Rate", f"{refusal_rate*100:.2f}%")
+
+    # Part 5: System Stability Trend (skip if no timestamp)
+    sample_entry = logs_all[0]
+    ts_keys = [key for key in ["timestamp", "ts", "time"] if key in sample_entry]
+    if ts_keys:
+        ts_key = ts_keys[0]
+
+        def _ts_value(entry: dict) -> str:
+            return str(entry.get(ts_key, ""))
+
+        timestamps = [_ts_value(item) for item in logs_all]
+        fig_trend = go.Figure()
+        fig_trend.add_trace(go.Scatter(x=timestamps, y=confidences, mode="lines+markers", name="Confidence", line=dict(color="#2196f3")))
+        fig_trend.add_trace(go.Scatter(x=timestamps, y=risks, mode="lines+markers", name="Risk", line=dict(color="#e53935")))
+        fig_trend.update_layout(
+            title="System Stability Over Time",
+            xaxis_title="Timestamp",
+            yaxis_title="Value",
+            yaxis=dict(range=[0, 1], gridcolor="#f0f0f0"),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            margin=dict(l=40, r=40, t=60, b=40),
+        )
+        st.plotly_chart(fig_trend, use_container_width=True)
+    else:
+        st.info("System Stability Trend skipped: logs contain no timestamp field.")
+else:
+    st.warning("No log data available to compute Autonomous Self-Healing Analytics.")
+
 # Section 6: Logs Explorer
 logs_container = st.container()
 with logs_container:

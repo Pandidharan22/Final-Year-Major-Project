@@ -79,7 +79,7 @@ def _run_single_pass(
     answer_length_chars = len(answer)
     answer_to_context_ratio = round(answer_length_chars / context_length_chars, 4) if context_length_chars else 0.0
     refusal_detected = REFUSAL_PHRASE in answer
-    base_risk = 1 - retrieval_confidence_score
+    base_risk = (1 - retrieval_confidence_score) ** 2
 
     if refusal_detected:
         hallucination_risk_score = min(base_risk * 0.3, 0.30)
