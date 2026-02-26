@@ -1,105 +1,82 @@
-## BANK_RAG
+# Autonomous Self-Healing LLM Ops Platform (Banking Support)
 
-End-to-end Retrieval-Augmented Generation (RAG) system for banking domain FAQs and policy documents. The project ingests curated PDFs/JSON, builds a FAISS vector index with MiniLM embeddings, and serves guardrailed answers via a Hugging Face Inference endpoint (Mistral-7B-Instruct by default). An observability-focused Streamlit dashboard surfaces live query metrics, latency, and logs.
+An MVP for an **Autonomous Self-Healing LLM Ops Platform for Banking Customer Support** that enforces semantic validation, trust scoring, and deterministic guardrails over retrieval-augmented responses. The focus is reliability: measuring confidence, compressing risk, triggering self-healing retries, and exposing observability for banking-domain assistance.
 
-### Key Features
-- Deterministic RAG pipeline: fixed seeds, stable ordering, no random UUIDs.
-- FAISS IndexFlatIP with sentence-transformers/all-MiniLM-L6-v2 embeddings (384-dim).
-- HF Router-backed chat completion (Mistral-7B-Instruct default; configurable provider).
-- Guardrails: refusal phrase enforcement, refusal-aware hallucination risk, self-healing trigger flag.
-- Telemetry: JSONL traces with similarity scores, confidence, risk, refusal flag, latency.
-- Streamlit dashboard: live query UI, metric panels, log explorer (latest entries).
-- Evaluation hooks and tests (see `tests/`).
+## What This MVP Delivers
+- **Deterministic ingestion + chunking** of RBI/SBI policy docs into structured context for banking QA.
+- **Retrieval + semantic validation** with calibrated confidence scoring and refusal awareness.
+- **Hallucination risk modeling** with refusal override, proportional penalties, and nonlinear base compression.
+- **Single-shot self-healing retry** via top-k expansion when risk is high (non-refusal cases only).
+- **Observability & analytics**: latency KPIs, evaluation metrics, and self-healing analytics (triggers, failure patterns, risk–confidence correlation, refusal distribution).
+- **Dashboard**: Streamlit app for live queries, metrics, and guardrail insights.
 
-### Repository Structure
-- `src/` – ingestion and RAG pipeline (`ingest.py`, `rag.py`, `retrieve.py`, etc.).
-- `data/` – raw and cleaned documents; chunks and prepared datasets.
-- `vector_store/` – FAISS index and metadata.
-- `logs/rag_traces.jsonl` – append-only telemetry traces.
-- `dashboard/` – Streamlit app (`app.py`) and helpers (`utils.py`).
-- `prompts/` – prompt templates and related assets.
-- `tests/` – evaluation and regression tests.
+## Architecture (MVP)
+- **Data pipeline**: deterministic PDF ingestion (pypdf + pdfplumber fallback), cleaning, semantic chunking (500 words, 75 overlap), MiniLM embeddings, FAISS index.
+- **Retrieval layer**: FAISS cosine search over normalized vectors; deterministic seeds and ordering.
+- **LLM layer**: Mistral-7B-Instruct via HF router with chat-style messages; temperature 0.2, max_tokens 300.
+- **Trust & risk**:
+  - Confidence = 0.7 * mean similarity + 0.3 * score spread (high/medium/low tiers).
+  - Base risk = (1 - confidence)^2 with proportional penalties; refusal path caps risk and blocks self-healing.
+- **Self-healing**: one retry with top_k=8 adopted only if risk decreases.
+- **Observability**: JSONL trace logging (append-only), evaluation metrics, dashboards for latency and self-healing analytics.
 
-### Prerequisites
-- Python 3.10+ (project uses 3.13 in the provided venv).
-- Git and a configured Hugging Face API token with access to the chosen model/provider.
-- Recommended: virtual environment (venv) located at `.venv/`.
+## Repository Layout (key paths)
+- `src/ingest.py` — deterministic PDF ingestion.
+- `src/chunk.py` — semantic chunking.
+- `vector_store/` — FAISS index + metadata.
+- `src/rag.py` — retrieval, LLM call, confidence/risk, self-healing.
+- `dashboard/app.py` — Streamlit UI (live queries, metrics, self-healing analytics).
+- `logs/rag_traces.jsonl` — append-only telemetry traces.
+- `evaluation/` — evaluation dataset and metrics helpers.
+- `DEVELOPMENT_LOG.md` — stepwise implementation log.
 
-### Setup
-```bash
-# From repo root
-python -m venv .venv
-source .venv/Scripts/activate  # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+## Prerequisites
+- Python 3.10+ with virtual environment (use the root `.venv`).
+- Install deps: `pip install -r requirements.txt`.
+- Hugging Face API token with access to `mistralai/Mistral-7B-Instruct-v0.2` (set `HF_API_TOKEN`).
 
-Create `.env` at repo root:
-```
-HF_API_TOKEN=your_hf_token
-HF_MODEL_ID=mistralai/Mistral-7B-Instruct-v0.2
-HF_INFERENCE_PROVIDER=  # optional, e.g., azure, aws, runpod
-```
+## Quickstart
+1. **Activate env**: `.\.venv\Scripts\activate` (PowerShell) or `source .venv/bin/activate` (Unix).
+2. **Install**: `pip install -r requirements.txt`.
+3. **Run CLI** (from `src/`): `python rag.py`.
+4. **Run dashboard** (from repo root): `streamlit run dashboard/app.py`.
 
-### Data Ingestion (if needed)
-```bash
-cd src
-python ingest.py
-```
-Outputs: chunked data under `data/chunks/` and FAISS index + metadata under `vector_store/`.
+## Dashboard Features
+- Live banking Q&A with confidence, risk, refusal, and latency breakdowns.
+- Similarity bars for top-k retrieval.
+- Gauges for confidence vs risk.
+- Latency analytics: histogram, mean retrieval vs generation.
+- Evaluation summary: accuracy, average confidence/risk, refusal rate, self-healing trigger rate.
+- **Autonomous Self-Healing Analytics**:
+  - Trigger distribution (pie + KPI)
+  - Failure patterns (high risk, low confidence, refusals)
+  - Risk vs confidence scatter with diagonal reference
+  - Refusal distribution (pie + KPI)
+  - Stability trend when timestamps become available (skips gracefully otherwise)
 
-### Running the RAG CLI
-```bash
-cd src
-python rag.py
-```
-Enter a question at the prompt; traces append to `logs/rag_traces.jsonl`.
+## Logging & Telemetry
+- **Source**: `logs/rag_traces.jsonl` append-only JSONL.
+- Fields include query, chunk IDs, similarity scores, confidence, risk, refusal flag, self-healing trigger, latencies, and retry outcomes.
+- Logs are excluded from git by default to keep telemetry local.
 
-### Streamlit Dashboard
-```bash
-cd Bank_RAG
-streamlit run dashboard/app.py
-```
-Dashboard shows live query inputs, returned answers, confidence/risk metrics, latency breakdown (retrieval, generation, total), and a log explorer (latest 10 entries).
+## Trust & Risk Guardrails (MVP)
+- Refusal-aware risk suppression; self-healing blocked on refusals.
+- Quadratic base risk to reduce over-dominance of mid-uncertainty cases.
+- Proportional penalties for confidence gap, spread gap, and answer/context ratio.
+- High-risk triggers a single deterministic retry with expanded context; adopts only if risk drops.
 
-### RAG Pipeline API
-`run_rag_pipeline(query: str) -> dict` (in `src/rag.py`) returns:
-- `answer`: str
-- `retrieval_confidence`: float
-- `confidence_level`: str
-- `hallucination_risk`: float
-- `risk_level`: str
-- `self_healing_triggered`: bool
-- `refusal_detected`: bool
-- `latency`: {`retrieval_ms`, `generation_ms`, `total_ms`}
-- `similarity_scores`: list[float]
-- `retrieved_chunk_ids`: list[str]
+## Determinism & Reproducibility
+- Fixed seeds for Python/NumPy/torch; CPU inference.
+- Sorted file and chunk ordering; static timestamps for artifacts.
+- Deterministic prompt and generation parameters.
 
-Telemetry logging to `logs/rag_traces.jsonl` remains unchanged and is appended per request.
+## Roadmap (next)
+- Add timestamps to traces for stability trendlines.
+- Broaden evaluation set and add regression checks for confidence/risk calibration.
+- Expand self-healing strategies beyond top-k (prompt tightening, fallback models) while keeping determinism.
 
-### Evaluation
-- Tests and evaluation scripts live under `tests/` (invoke with `python -m pytest` or custom eval runner if provided).
-- Use the same `.env` and FAISS artifacts for consistent results.
+## Running Tests
+- (Planned) Evaluation harness under `evaluation/` for retrieval/refusal metrics; extend as needed.
 
-### Guardrails and Risk Logic
-- Refusal phrase: "I don't have sufficient information in the provided documents." (checked via substring)
-- Risk scoring is refusal-aware: refusal reduces risk and disables self-healing trigger; penalties apply only to non-refusal answers.
-- Self-healing trigger is flagged when risk is high (for future retry/fallback hooks).
-
-### Logging and Observability
-- `logs/rag_traces.jsonl` captures query, chunk IDs, similarity scores, confidence, risk, refusal flag, latency, and models used.
-- Streamlit dashboard reads the latest 10 entries for quick inspection.
-
-### Troubleshooting
-- Missing token: set `HF_API_TOKEN` in `.env`.
-- Provider errors (404/429/401): verify `HF_MODEL_ID` and `HF_INFERENCE_PROVIDER` mapping on HF Router; consider rate limits.
-- Empty or low-confidence answers: confirm FAISS index/chunks exist under `vector_store/` and `data/chunks/`.
-- Dashboard errors: ensure the app is launched from `Bank_RAG` with the venv active and that logs file is present (empty is fine).
-
-### Contributing Workflow
-- Keep changes deterministic; avoid introducing randomness in retrieval or risk scoring.
-- Add/update tests for regressions where applicable.
-- Use meaningful commits (e.g., `feat: ...`, `fix: ...`, `docs: ...`).
-
-### License
-Project code is provided for educational and internal use. Review repository terms or add a LICENSE file if distribution is needed.
+## License
+Internal/MVP use; add license terms before distribution.
